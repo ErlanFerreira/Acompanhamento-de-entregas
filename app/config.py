@@ -15,7 +15,6 @@ GWSERVICOS_SENHA = os.environ.get("GWSERVICOS_SENHA", "")
 GWSERVICOS_GUID = os.environ.get("GWSERVICOS_GUID", "")
 
 SYNC_WINDOW_DAYS = int(os.environ.get("SYNC_WINDOW_DAYS", "90"))
-SYNC_TIMES = os.environ.get("SYNC_TIMES", "06:10,11:10,15:10,19:10")
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")

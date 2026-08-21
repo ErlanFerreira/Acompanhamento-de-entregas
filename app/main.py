@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from . import sync
 from .db import get_db
 from .models import Carga, Meta, User
-from .scheduler import start_scheduler
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
@@ -33,8 +32,10 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # A sincronização periódica roda via GitHub Actions (ver .github/workflows/sync.yml),
+    # não dentro do processo web -- necessário porque a Vercel roda o app como função
+    # serverless (sem processo de fundo de longa duração).
     init_db_and_seed()
-    start_scheduler()
     yield
 
 
