@@ -35,6 +35,8 @@ body {
   --status-critical: #d03b3b;
 
   --accent: #2a78d6;
+
+  color: var(--text-primary);
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) .viz-root,
