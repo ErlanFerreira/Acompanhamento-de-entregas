@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login — Painel Transrota</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" action="/login">
+    <h1>Painel de Pendências</h1>
+    <p class="login-sub">Transrota</p>
+    {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+    <label>E-mail<input type="email" name="email" required autofocus></label>
+    <label>Senha<input type="password" name="senha" required></label>
+    <button type="submit" class="btn-primary">Entrar</button>
+  </form>
+</body>
+</html>

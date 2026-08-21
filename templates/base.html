@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Painel Transrota{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">Transrota</div>
+    <nav>
+      <a href="/painel" class="nav-link {{ 'active' if active == 'painel' else '' }}">Painel</a>
+      {% if user and user.role == 'admin' %}
+      <a href="/usuarios" class="nav-link {{ 'active' if active == 'usuarios' else '' }}">Gestão de Usuários</a>
+      {% endif %}
+    </nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-user">{{ user.nome or user.email }}</div>
+      <a href="/logout" class="nav-link logout">Sair</a>
+    </div>
+  </aside>
+  <main class="app-content">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+<script src="/static/theme.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

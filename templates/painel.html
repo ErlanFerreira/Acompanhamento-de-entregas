@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Painel — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+
+  <header class="app-header">
+    <div>
+      <h1>Painel de Pendências de Entregas</h1>
+      <p id="header-sub">Carregando…</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="theme-toggle" id="btn-sync" type="button">↻ Atualizar agora</button>
+      <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+    </div>
+  </header>
+
+  <section class="filters" id="filters">
+    <div class="filter-group">
+      <span class="filter-label">Emissão CT-e</span>
+      <select id="f-date-preset">
+        <option value="all">Todo o período</option>
+        <option value="3">Últimos 3 dias</option>
+        <option value="7">Últimos 7 dias</option>
+        <option value="14">Últimos 14 dias</option>
+        <option value="30">Últimos 30 dias</option>
+        <option value="custom">Personalizado…</option>
+      </select>
+      <input type="date" id="f-date-from" style="display:none">
+      <span id="f-date-sep" style="display:none; color: var(--text-muted); font-size:12px;">até</span>
+      <input type="date" id="f-date-to" style="display:none">
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">UF destino</span>
+      <select id="f-uf"><option value="all">Todas</option></select>
+    </div>
+    <div class="filter-group" id="f-status">
+      <span class="filter-label">Status</span>
+      <button class="chip active" data-state="good" type="button"><span class="dot-swatch" style="background:var(--status-good)"></span>No prazo</button>
+      <button class="chip active" data-state="warning" type="button"><span class="dot-swatch" style="background:var(--status-warning)"></span>Pendente</button>
+      <button class="chip active" data-state="critical" type="button"><span class="dot-swatch" style="background:var(--status-critical)"></span>Pendente vencido</button>
+      <button class="chip active" data-state="serious" type="button"><span class="dot-swatch" style="background:var(--status-serious)"></span>Entregue atrasado</button>
+    </div>
+    <div class="filter-group" style="flex:1; min-width:200px;">
+      <input type="text" id="f-search" placeholder="Buscar CT-e ou empresa…">
+    </div>
+    <span class="reset-link" id="f-reset">Limpar filtros</span>
+  </section>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="grid-2">
+    <figure class="chart-card" id="card-status">
+      <div class="chart-title">Composição das pendências</div>
+      <div class="chart-subtitle">Distribuição dos CT-e filtrados por status de entrega</div>
+      <div id="chart-status"></div>
+      <div class="legend" id="legend-status"></div>
+    </figure>
+    <figure class="chart-card" id="card-trend">
+      <div class="chart-title">Evolução por data de emissão</div>
+      <div class="chart-subtitle">CT-e emitidos por dia, coloridos por status</div>
+      <div id="chart-trend"></div>
+      <div class="legend" id="legend-trend"></div>
+    </figure>
+  </section>
+
+  <section class="grid-2">
+    <figure class="chart-card" id="card-remetentes">
+      <div class="chart-title">Remetentes com mais pendências</div>
+      <div class="chart-subtitle">Top 10 · CT-e ainda não entregues (pendentes)</div>
+      <div id="chart-remetentes"></div>
+    </figure>
+    <figure class="chart-card" id="card-cidades">
+      <div class="chart-title">Cidades de destino com mais pendências</div>
+      <div class="chart-subtitle">Top 10 · CT-e ainda não entregues (pendentes)</div>
+      <div id="chart-cidades"></div>
+    </figure>
+  </section>
+
+  <section class="grid-2">
+    <figure class="chart-card" id="card-causas">
+      <div class="chart-title">Causas mais frequentes</div>
+      <div class="chart-subtitle">Última ocorrência registrada · pendentes e entregues atrasados</div>
+      <div id="chart-causas"></div>
+    </figure>
+    <figure class="chart-card" id="card-doc">
+      <div class="chart-title">Documentação pendente</div>
+      <div class="chart-subtitle">Entre os CT-e ainda pendentes de entrega</div>
+      <div id="chart-doc"></div>
+    </figure>
+  </section>
+
+  <section class="table-section">
+    <div class="table-toolbar">
+      <h2>Detalhe das pendências</h2>
+      <span class="count" id="table-count"></span>
+      <div style="flex:1"></div>
+      <label class="check"><input type="checkbox" id="t-only-open" checked> Somente pendentes (não entregues)</label>
+      <button class="btn" id="t-export">Baixar CSV</button>
+    </div>
+    <div class="table-scroll">
+      <table class="detail" id="detail-table">
+        <thead>
+          <tr>
+            <th data-key="cte">CT-e</th>
+            <th data-key="emissao">Emissão</th>
+            <th data-key="remetente">Remetente</th>
+            <th data-key="destinatario">Destinatário</th>
+            <th data-key="cidade_dest">Cidade / UF</th>
+            <th data-key="status">Status</th>
+            <th data-key="dias_atraso">Dias</th>
+            <th data-key="ocorrencia">Última ocorrência</th>
+            <th data-key="manifesto">Manif.</th>
+            <th data-key="romaneio">Roman.</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="pagination"></div>
+  </section>
+
+  <footer class="app-footer">
+    <strong>Dados ao vivo</strong> — sincronizados automaticamente com a API GW Serviços várias vezes ao dia. Use "Atualizar agora" para forçar uma sincronização imediata.
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/dashboard.js"></script>
+{% endblock %}
