@@ -160,6 +160,6 @@ def run_sync(db: Session, window_days: int = None) -> int:
     except Exception as exc:
         db.rollback()
         _set_meta(db, "last_sync_status", "erro")
-        _set_meta(db, "last_sync_error", str(exc)[:500])
+        _set_meta(db, "last_sync_error", str(exc)[:250])
         db.commit()
         raise
