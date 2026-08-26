@@ -1,31 +1,47 @@
 # Painel de Pendências de Entregas — Transrota
 
-Aplicação web (FastAPI + Postgres) que sincroniza automaticamente com a API
-"GW Serviços" e exibe um painel de pendências de entrega, com login por
-usuário/senha e gestão de usuários.
+Aplicação web (FastAPI + Postgres) que sincroniza automaticamente com o
+sistema GW Sistemas e exibe um painel de pendências de entrega, com login
+por usuário/senha e gestão de usuários.
 
 ## O que a aplicação faz
 
-- Sincroniza com a API GW Serviços **automaticamente 4x ao dia** via um
-  workflow do GitHub Actions (`.github/workflows/sync.yml`), gravando os
-  CT-e num banco Postgres.
+- Sincroniza com o relatório personalizado **"Pendências"** do portal
+  Webtrans **automaticamente 4x ao dia**, via um workflow do GitHub Actions
+  (`.github/workflows/sync.yml`) que automatiza login + geração do relatório
+  num navegador headless, e grava os CT-e num banco Postgres.
 - Login por e-mail/senha, com dois papéis: **admin** (vê o Painel e gerencia
   usuários) e **usuário** (só vê o Painel).
 - Sidebar com as abas **Painel** e **Gestão de Usuários** (esta última só
   visível para admins).
 - No Painel, os filtros de data (inclusive "Personalizado…") deixam o próprio
   usuário consultar qualquer período dentro do que já foi sincronizado.
-- Botão "Atualizar agora" para forçar uma sincronização imediata sem esperar
-  o próximo horário agendado.
+- Botão "Atualizar agora" dispara uma sincronização fora do horário
+  agendado (assíncrona — leva 1-2 minutos, não é instantânea).
+
+### Por que via navegador automatizado, e não a API oficial
+
+A API "GW Serviços" existe e autentica normalmente, mas só retorna cargas
+onde o CNPJ logado é remetente ou destinatário — um acesso de "cliente", não
+de transportadora. Comparamos direto: a API trazia ~12 CT-e/mês para uma
+filial que na verdade emite +5.000/mês. A única forma encontrada de obter a
+visão completa da empresa foi automatizar exatamente os cliques que um
+usuário faria no portal Webtrans para gerar o relatório "Pendências" (login
+normal, que tem acesso total). Ver `HANDOFF.md` para o histórico completo
+dessa investigação.
 
 ## Arquitetura de hospedagem (100% gratuita)
 
-- **Vercel** hospeda o app (FastAPI rodando como função serverless).
+- **Vercel** hospeda o app (FastAPI rodando como função serverless) — só as
+  dependências leves (`requirements.txt`), sem o navegador automatizado.
 - **Neon** é o banco Postgres (tier gratuito permanente).
-- **GitHub Actions** dispara a sincronização periódica (`scripts/run_sync.py`)
-  direto no banco, independente do app estar sendo acessado ou não —
-  necessário porque a Vercel não mantém processos de fundo rodando entre
-  requisições.
+- **GitHub Actions** roda a sincronização periódica (`scripts/run_sync.py`,
+  com Playwright + Chromium — `requirements-sync.txt`), direto no banco,
+  independente do app estar sendo acessado ou não. A Vercel não conseguiria
+  rodar isso (função serverless não comporta um navegador Chromium
+  instalado nem processos de fundo de longa duração).
+- O botão "Atualizar agora" do painel dispara esse mesmo workflow via a API
+  do GitHub (`workflow_dispatch`), não roda nada pesado dentro da Vercel.
 
 ## Rodando localmente
 
@@ -39,6 +55,14 @@ Sem `DATABASE_URL` preenchido, usa um arquivo SQLite local (`local.db`) —
 suficiente para testar. Na primeira subida, se não houver nenhum usuário no
 banco, um admin é criado automaticamente com `ADMIN_EMAIL`/`ADMIN_PASSWORD`
 do `.env`.
+
+Para testar a sincronização localmente (não precisa pra rodar só o app):
+
+```bash
+python -m pip install -r requirements-sync.txt
+python -m playwright install chromium
+python scripts/run_sync.py
+```
 
 ## Deploy (Vercel + Neon + GitHub Actions)
 
@@ -62,13 +86,12 @@ do `.env`.
    |---|---|
    | `DATABASE_URL` | a connection string pooled da Neon (passo 1) |
    | `SECRET_KEY` | uma string aleatória longa (gere com `python -c "import secrets; print(secrets.token_hex(32))"`) |
-   | `GWSERVICOS_LOGIN` | mesmo valor do seu `.env` local (não commitado) |
-   | `GWSERVICOS_SENHA` | mesmo valor do seu `.env` local (não commitado) |
-   | `GWSERVICOS_GUID` | mesmo valor do seu `.env` local (não commitado) |
    | `SYNC_WINDOW_DAYS` | `90` |
    | `ADMIN_EMAIL` | e-mail do primeiro administrador |
    | `ADMIN_PASSWORD` | senha do primeiro administrador (troque depois do primeiro login) |
    | `ADMIN_NOME` | nome do primeiro administrador |
+   | `GITHUB_REPO` | `usuario/nome-do-repositorio` (para o botão "Atualizar agora") |
+   | `GITHUB_DISPATCH_TOKEN` | um PAT do GitHub com escopo `workflow` (passo 3.3) |
 
 4. Clique em **Deploy**. Ao final, acesse a URL `*.vercel.app` gerada, faça
    login com `ADMIN_EMAIL`/`ADMIN_PASSWORD` e troque a senha em **Gestão de
@@ -80,20 +103,27 @@ do `.env`.
 1. No repositório GitHub, vá em **Settings → Secrets and variables →
    Actions → New repository secret** e crie:
    - `DATABASE_URL` (a mesma connection string da Neon)
-   - `GWSERVICOS_LOGIN`, `GWSERVICOS_SENHA`, `GWSERVICOS_GUID`
+   - `PORTAL_EMAIL`, `PORTAL_SENHA` (login normal do portal Webtrans — **não**
+     as credenciais da API GW Serviços)
 2. O workflow `.github/workflows/sync.yml` já está no repositório e roda
    sozinho nos horários definidos (padrão: 06:10, 11:10, 15:10 e 19:10,
    horário de Brasília). Para rodar manualmente a qualquer momento: aba
    **Actions** do repositório → "Sincronizar pendências" → **Run workflow**.
 3. Para mudar os horários, edite o `cron:` em `.github/workflows/sync.yml`
    (horários em UTC = horário de Brasília + 3h) e faça commit/push.
+4. Para o botão "Atualizar agora" funcionar: crie um token em
+   [github.com/settings/tokens](https://github.com/settings/tokens) — um
+   **fine-grained token** com acesso só a este repositório e permissão
+   "Actions: Read and write" (ou um classic token com escopo `workflow`) — e
+   configure como `GITHUB_DISPATCH_TOKEN` na Vercel (passo 2.3).
 
 ### Sobre custo
 
 Essa combinação é gratuita indefinidamente para o volume de uso deste
 painel: Vercel Hobby (sem custo), Neon tier gratuito (sem custo), GitHub
-Actions (repositório privado tem 2000 minutos grátis/mês — esta sincronização
-usa uma fração disso).
+Actions (repositório privado tem 2000 minutos grátis/mês — a automação de
+navegador é mais pesada que uma chamada de API simples, mas 4 execuções/dia
+ainda ficam bem dentro do limite gratuito).
 
 ## Estrutura do projeto
 
@@ -104,14 +134,18 @@ app/
   db.py           conexão SQLAlchemy
   models.py       tabelas: users, cargas, meta
   security.py     hashing de senha (bcrypt), sessão via cookie assinado
-  sync.py         autenticação + busca na API GW Serviços + upsert no banco
+  scrape.py       automação de navegador (Playwright): login + gerar relatório
+  sync.py         parseia o Excel do relatório e faz upsert no banco
   seed.py         cria as tabelas e o primeiro admin na primeira subida
 templates/        HTML (Jinja2): base (sidebar), login, painel, usuarios
 static/           CSS + JS (dashboard.js, usuarios.js, theme.js)
-scripts/run_sync.py        rodado pelo GitHub Actions (sincronização periódica)
-.github/workflows/sync.yml agendamento da sincronização (cron)
+scripts/run_sync.py         rodado pelo GitHub Actions (sincronização periódica)
+.github/workflows/sync.yml  agendamento da sincronização (cron)
+requirements.txt             dependências do app web (Vercel)
+requirements-sync.txt        requirements.txt + openpyxl + playwright (só CI)
 ```
 
-O histórico completo do projeto (incluindo como as credenciais da API GW
-Serviços foram descobertas) está no `HANDOFF.md` guardado localmente — esse
-arquivo tem valores sensíveis e não deve ser commitado neste repositório.
+O histórico completo do projeto (incluindo como a limitação da API GW
+Serviços foi descoberta e por que migramos para automação de navegador)
+está no `HANDOFF.md` guardado localmente — esse arquivo tem valores
+sensíveis e não deve ser commitado neste repositório.

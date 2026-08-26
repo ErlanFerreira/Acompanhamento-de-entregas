@@ -132,15 +132,14 @@
       syncBtn.addEventListener("click", async function () {
         syncBtn.disabled = true;
         const original = syncBtn.textContent;
-        syncBtn.textContent = "Sincronizando…";
+        syncBtn.textContent = "Disparando…";
         try {
           const resp = await fetch("/api/sync/run", { method: "POST", credentials: "same-origin" });
           const body = await resp.json();
-          if (!resp.ok || !body.ok) throw new Error(body.erro || "Falha na sincronização.");
-          const fresh = await loadData();
-          if (fresh) boot(fresh);
+          if (!resp.ok || !body.ok) throw new Error(body.erro || "Falha ao disparar a sincronização.");
+          alert("Sincronização disparada! Ela roda em segundo plano e leva 1-2 minutos — atualize a página depois para ver os dados novos.");
         } catch (e) {
-          alert("Não foi possível sincronizar agora: " + e.message);
+          alert("Não foi possível disparar a sincronização: " + e.message);
         } finally {
           syncBtn.disabled = false;
           syncBtn.textContent = original;

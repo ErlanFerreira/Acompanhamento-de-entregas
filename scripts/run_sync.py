@@ -1,10 +1,12 @@
 """Executado pelo workflow do GitHub Actions (.github/workflows/sync.yml)
-várias vezes ao dia. Autentica na API GW Serviços, busca as cargas e grava
-no banco Postgres (Neon) -- o mesmo banco que o app lê.
+várias vezes ao dia. Faz login no portal Webtrans, gera o relatório
+personalizado "Pendências" e grava os dados no banco Postgres (Neon) -- o
+mesmo banco que o app lê.
 
 Uso: python scripts/run_sync.py
-Variáveis de ambiente necessárias: DATABASE_URL, GWSERVICOS_LOGIN,
-GWSERVICOS_SENHA, GWSERVICOS_GUID (e opcionalmente SYNC_WINDOW_DAYS).
+Variáveis de ambiente necessárias: DATABASE_URL, PORTAL_EMAIL, PORTAL_SENHA
+(e opcionalmente SYNC_WINDOW_DAYS). Precisa de `playwright install chromium`
+antes de rodar (ver requirements-sync.txt).
 """
 
 import os

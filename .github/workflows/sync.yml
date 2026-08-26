@@ -17,12 +17,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements-sync.txt
+
+      - run: python -m playwright install --with-deps chromium
 
       - run: python scripts/run_sync.py
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          GWSERVICOS_LOGIN: ${{ secrets.GWSERVICOS_LOGIN }}
-          GWSERVICOS_SENHA: ${{ secrets.GWSERVICOS_SENHA }}
-          GWSERVICOS_GUID: ${{ secrets.GWSERVICOS_GUID }}
+          PORTAL_EMAIL: ${{ secrets.PORTAL_EMAIL }}
+          PORTAL_SENHA: ${{ secrets.PORTAL_SENHA }}
           SYNC_WINDOW_DAYS: "90"

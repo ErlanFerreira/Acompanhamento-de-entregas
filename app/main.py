@@ -2,6 +2,7 @@ import datetime
 import logging
 from contextlib import asynccontextmanager
 
+import requests
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
@@ -10,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from . import sync
+from . import config
 from .db import get_db
 from .models import Carga, Meta, User
 from .security import (
@@ -148,19 +149,36 @@ def api_cargas(
         "gerado_em": gerado_em,
         "referencia": datetime.date.today().isoformat(),
         "total": len(records),
-        "fonte": "GWTrans (GW Serviços) - listarCargas, atualização automática",
+        "fonte": "Webtrans (GW Sistemas) - relatório \"Pendências\", atualização automática",
     }
     return {"meta": meta, "records": records}
 
 
 @app.post("/api/sync/run")
-def api_sync_run(user: User = Depends(require_admin_api), db: Session = Depends(get_db)):
+def api_sync_run(user: User = Depends(require_admin_api)):
+    """Dispara a sincronização via GitHub Actions (workflow_dispatch).
+
+    O app web (Vercel) não roda a automação de navegador diretamente --
+    ela precisa de um Chromium instalado, inviável numa função serverless.
+    Isso só enfileira o job; o resultado aparece no painel após o workflow
+    terminar (~1-2 min), não instantaneamente.
+    """
+    if not config.GITHUB_REPO or not config.GITHUB_DISPATCH_TOKEN:
+        return JSONResponse(
+            {"ok": False, "erro": "GITHUB_REPO/GITHUB_DISPATCH_TOKEN não configurados nesta implantação."},
+            status_code=500,
+        )
+    url = f"https://api.github.com/repos/{config.GITHUB_REPO}/actions/workflows/sync.yml/dispatches"
+    headers = {
+        "Authorization": f"Bearer {config.GITHUB_DISPATCH_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
     try:
-        count = sync.run_sync(db)
-        return {"ok": True, "count": count}
-    except sync.SyncError as exc:
-        return JSONResponse({"ok": False, "erro": str(exc)}, status_code=502)
-    except Exception as exc:
+        resp = requests.post(url, headers=headers, json={"ref": "main"}, timeout=15)
+        if resp.status_code >= 300:
+            return JSONResponse({"ok": False, "erro": f"GitHub respondeu {resp.status_code}: {resp.text[:300]}"}, status_code=502)
+        return {"ok": True, "queued": True}
+    except requests.RequestException as exc:
         return JSONResponse({"ok": False, "erro": str(exc)}, status_code=502)
 
 

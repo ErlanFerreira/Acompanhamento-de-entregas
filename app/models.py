@@ -20,7 +20,12 @@ class Carga(Base):
     __tablename__ = "cargas"
 
     id = Column(Integer, primary_key=True)
-    cte = Column(String(50), unique=True, nullable=False, index=True)
+    # Chave única real: "cnpj_filial:numero_cte". O número do CT-e ("cte")
+    # sozinho NÃO é único -- cada filial tem sua própria numeração e pode
+    # repetir números entre si.
+    id_cte = Column(String(80), unique=True, nullable=False, index=True)
+    cte = Column(String(50), index=True)
+    cnpj_filial = Column(String(20), index=True)
     emissao = Column(String(10))
     remetente = Column(String(255))
     consignatario = Column(String(255))
