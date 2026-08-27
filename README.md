@@ -1,8 +1,8 @@
 # Painel de Pendências de Entregas — Transrota
 
 Aplicação web (FastAPI + Postgres) que sincroniza automaticamente com o
-sistema GW Sistemas e exibe um painel de pendências de entrega, com login
-por usuário/senha e gestão de usuários.
+sistema GW Sistemas e exibe um painel de pendências de entrega, atrás de
+uma senha única compartilhada (sem contas de usuário).
 
 ## O que a aplicação faz
 
@@ -10,10 +10,8 @@ por usuário/senha e gestão de usuários.
   Webtrans **automaticamente 4x ao dia**, via um workflow do GitHub Actions
   (`.github/workflows/sync.yml`) que automatiza login + geração do relatório
   num navegador headless, e grava os CT-e num banco Postgres.
-- Login por e-mail/senha, com dois papéis: **admin** (vê o Painel e gerencia
-  usuários) e **usuário** (só vê o Painel).
-- Sidebar com as abas **Painel** e **Gestão de Usuários** (esta última só
-  visível para admins).
+- Acesso protegido por uma **senha única** (`PAINEL_SENHA`) — sem gestão de
+  usuários/contas individuais.
 - No Painel, os filtros de data (inclusive "Personalizado…") deixam o próprio
   usuário consultar qualquer período dentro do que já foi sincronizado.
 - Botão "Atualizar agora" dispara uma sincronização fora do horário
@@ -52,8 +50,7 @@ python -m uvicorn app.main:app --reload --port 8000
 ```
 
 Sem `DATABASE_URL` preenchido, usa um arquivo SQLite local (`local.db`) —
-suficiente para testar. Na primeira subida, se não houver nenhum usuário no
-banco, um admin é criado automaticamente com `ADMIN_EMAIL`/`ADMIN_PASSWORD`
+suficiente para testar. O login usa a senha definida em `PAINEL_SENHA`
 do `.env`.
 
 Para testar a sincronização localmente (não precisa pra rodar só o app):
@@ -87,15 +84,12 @@ python scripts/run_sync.py
    | `DATABASE_URL` | a connection string pooled da Neon (passo 1) |
    | `SECRET_KEY` | uma string aleatória longa (gere com `python -c "import secrets; print(secrets.token_hex(32))"`) |
    | `SYNC_WINDOW_DAYS` | `90` |
-   | `ADMIN_EMAIL` | e-mail do primeiro administrador |
-   | `ADMIN_PASSWORD` | senha do primeiro administrador (troque depois do primeiro login) |
-   | `ADMIN_NOME` | nome do primeiro administrador |
+   | `PAINEL_SENHA` | a senha para acessar o painel (compartilhe só com quem precisa) |
    | `GITHUB_REPO` | `usuario/nome-do-repositorio` (para o botão "Atualizar agora") |
    | `GITHUB_DISPATCH_TOKEN` | um PAT do GitHub com escopo `workflow` (passo 3.3) |
 
-4. Clique em **Deploy**. Ao final, acesse a URL `*.vercel.app` gerada, faça
-   login com `ADMIN_EMAIL`/`ADMIN_PASSWORD` e troque a senha em **Gestão de
-   Usuários**.
+4. Clique em **Deploy**. Ao final, acesse a URL `*.vercel.app` gerada e
+   entre com `PAINEL_SENHA`.
 5. Cada `git push` no branch `main` dispara um novo deploy automático.
 
 ### 3. Sincronização automática (GitHub Actions)
@@ -129,16 +123,16 @@ ainda ficam bem dentro do limite gratuito).
 
 ```
 app/
-  main.py         rotas (login, painel, API de cargas, gestão de usuários)
+  main.py         rotas (login, painel, API de cargas)
   config.py       variáveis de ambiente
   db.py           conexão SQLAlchemy
-  models.py       tabelas: users, cargas, meta
-  security.py     hashing de senha (bcrypt), sessão via cookie assinado
+  models.py       tabelas: cargas, meta
+  security.py     sessão via cookie assinado (senha única, sem contas)
   scrape.py       automação de navegador (Playwright): login + gerar relatório
   sync.py         parseia o Excel do relatório e faz upsert no banco
-  seed.py         cria as tabelas e o primeiro admin na primeira subida
-templates/        HTML (Jinja2): base (sidebar), login, painel, usuarios
-static/           CSS + JS (dashboard.js, usuarios.js, theme.js)
+  seed.py         cria as tabelas na primeira subida
+templates/        HTML (Jinja2): base (sidebar), login, painel
+static/           CSS + JS (dashboard.js, theme.js)
 scripts/run_sync.py         rodado pelo GitHub Actions (sincronização periódica)
 .github/workflows/sync.yml  agendamento da sincronização (cron)
 requirements.txt             dependências do app web (Vercel)

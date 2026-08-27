@@ -19,9 +19,8 @@ PORTAL_SENHA = os.environ.get("PORTAL_SENHA", "")
 
 SYNC_WINDOW_DAYS = int(os.environ.get("SYNC_WINDOW_DAYS", "90"))
 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
-ADMIN_NOME = os.environ.get("ADMIN_NOME", "Administrador")
+# Senha única compartilhada para acessar o painel (sem contas de usuário).
+PAINEL_SENHA = os.environ.get("PAINEL_SENHA", "")
 
 # Para o botão "Atualizar agora" do painel disparar a sincronização via
 # GitHub Actions (a Vercel não consegue rodar o navegador automatizado).

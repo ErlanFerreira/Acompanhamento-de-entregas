@@ -13,18 +13,14 @@ from sqlalchemy.orm import Session
 
 from . import config
 from .db import get_db
-from .models import Carga, Meta, User
+from .models import Carga, Meta
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
     create_session_cookie,
-    get_current_user,
-    hash_password,
-    require_admin_api,
-    require_admin_page,
-    require_user_api,
-    require_user_page,
-    verify_password,
+    is_authenticated,
+    require_auth_api,
+    require_auth_page,
 )
 from .seed import init_db_and_seed
 
@@ -56,33 +52,26 @@ async def redirect_aware_exception_handler(request: Request, exc: HTTPException)
 # ---------------------------------------------------------------- auth ----
 
 @app.get("/", response_class=HTMLResponse)
-def root(request: Request, db: Session = Depends(get_db)):
-    user = get_current_user(request, db)
-    return RedirectResponse(url="/painel" if user else "/login")
+def root(request: Request):
+    return RedirectResponse(url="/painel" if is_authenticated(request) else "/login")
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, db: Session = Depends(get_db)):
-    if get_current_user(request, db):
+def login_page(request: Request):
+    if is_authenticated(request):
         return RedirectResponse(url="/painel")
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
 
 
 @app.post("/login", response_class=HTMLResponse)
-def login_submit(
-    request: Request,
-    email: str = Form(...),
-    senha: str = Form(...),
-    db: Session = Depends(get_db),
-):
-    user = db.query(User).filter(User.email == email.strip().lower()).first()
-    if not user or not verify_password(senha, user.password_hash):
+def login_submit(request: Request, senha: str = Form(...)):
+    if not config.PAINEL_SENHA or senha != config.PAINEL_SENHA:
         return templates.TemplateResponse(
             "login.html",
-            {"request": request, "error": "E-mail ou senha incorretos."},
+            {"request": request, "error": "Senha incorreta."},
             status_code=401,
         )
-    token = create_session_cookie(user.id)
+    token = create_session_cookie()
     resp = RedirectResponse(url="/painel", status_code=303)
     resp.set_cookie(COOKIE_NAME, token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="lax")
     return resp
@@ -97,11 +86,9 @@ def logout():
 
 # ------------------------------------------------------------- painel -----
 
-@app.get("/painel", response_class=HTMLResponse)
-def painel_page(request: Request, user: User = Depends(require_user_page)):
-    return templates.TemplateResponse(
-        "painel.html", {"request": request, "user": user, "active": "painel"}
-    )
+@app.get("/painel", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+def painel_page(request: Request):
+    return templates.TemplateResponse("painel.html", {"request": request, "active": "painel"})
 
 
 def _row_to_dict(r: Carga) -> dict:
@@ -127,11 +114,10 @@ def _row_to_dict(r: Carga) -> dict:
     }
 
 
-@app.get("/api/cargas")
+@app.get("/api/cargas", dependencies=[Depends(require_auth_api)])
 def api_cargas(
     data_inicial: str | None = None,
     data_final: str | None = None,
-    user: User = Depends(require_user_api),
     db: Session = Depends(get_db),
 ):
     q = db.query(Carga)
@@ -154,8 +140,8 @@ def api_cargas(
     return {"meta": meta, "records": records}
 
 
-@app.post("/api/sync/run")
-def api_sync_run(user: User = Depends(require_admin_api)):
+@app.post("/api/sync/run", dependencies=[Depends(require_auth_api)])
+def api_sync_run():
     """Dispara a sincronização via GitHub Actions (workflow_dispatch).
 
     O app web (Vercel) não roda a automação de navegador diretamente --
@@ -180,92 +166,3 @@ def api_sync_run(user: User = Depends(require_admin_api)):
         return {"ok": True, "queued": True}
     except requests.RequestException as exc:
         return JSONResponse({"ok": False, "erro": str(exc)}, status_code=502)
-
-
-# ----------------------------------------------------- gestão de usuários -
-
-@app.get("/usuarios", response_class=HTMLResponse)
-def usuarios_page(request: Request, user: User = Depends(require_admin_page)):
-    return templates.TemplateResponse(
-        "usuarios.html", {"request": request, "user": user, "active": "usuarios"}
-    )
-
-
-def _user_to_dict(u: User) -> dict:
-    return {
-        "id": u.id,
-        "nome": u.nome,
-        "email": u.email,
-        "role": u.role,
-        "created_at": u.created_at.strftime("%Y-%m-%d") if u.created_at else None,
-    }
-
-
-@app.get("/api/usuarios")
-def api_usuarios_list(user: User = Depends(require_admin_api), db: Session = Depends(get_db)):
-    rows = db.query(User).order_by(User.created_at.asc()).all()
-    return {"usuarios": [_user_to_dict(u) for u in rows]}
-
-
-@app.post("/api/usuarios")
-def api_usuarios_create(
-    payload: dict,
-    user: User = Depends(require_admin_api),
-    db: Session = Depends(get_db),
-):
-    email = (payload.get("email") or "").strip().lower()
-    senha = payload.get("senha") or ""
-    nome = (payload.get("nome") or "").strip()
-    role = payload.get("role") or "user"
-
-    if not email or not senha:
-        return JSONResponse({"erro": "E-mail e senha são obrigatórios."}, status_code=400)
-    if role not in ("admin", "user"):
-        return JSONResponse({"erro": "Papel inválido."}, status_code=400)
-    if db.query(User).filter(User.email == email).first():
-        return JSONResponse({"erro": "Já existe um usuário com esse e-mail."}, status_code=409)
-
-    novo = User(email=email, password_hash=hash_password(senha), nome=nome or None, role=role)
-    db.add(novo)
-    db.commit()
-    return _user_to_dict(novo)
-
-
-@app.put("/api/usuarios/{user_id}")
-def api_usuarios_update(
-    user_id: int,
-    payload: dict,
-    user: User = Depends(require_admin_api),
-    db: Session = Depends(get_db),
-):
-    alvo = db.query(User).filter(User.id == user_id).first()
-    if not alvo:
-        return JSONResponse({"erro": "Usuário não encontrado."}, status_code=404)
-
-    if "nome" in payload:
-        alvo.nome = (payload.get("nome") or "").strip() or None
-    if "role" in payload and payload["role"] in ("admin", "user"):
-        if alvo.id == user.id and payload["role"] != "admin":
-            return JSONResponse({"erro": "Você não pode remover seu próprio acesso de administrador."}, status_code=400)
-        alvo.role = payload["role"]
-    if payload.get("senha"):
-        alvo.password_hash = hash_password(payload["senha"])
-
-    db.commit()
-    return _user_to_dict(alvo)
-
-
-@app.delete("/api/usuarios/{user_id}")
-def api_usuarios_delete(
-    user_id: int,
-    user: User = Depends(require_admin_api),
-    db: Session = Depends(get_db),
-):
-    if user_id == user.id:
-        return JSONResponse({"erro": "Você não pode remover o próprio usuário."}, status_code=400)
-    alvo = db.query(User).filter(User.id == user_id).first()
-    if not alvo:
-        return JSONResponse({"erro": "Usuário não encontrado."}, status_code=404)
-    db.delete(alvo)
-    db.commit()
-    return {"ok": True}
