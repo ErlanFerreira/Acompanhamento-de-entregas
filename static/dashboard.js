@@ -269,7 +269,7 @@
       const totals = days.map(d => order.reduce((s, k) => s + byDay.get(d)[k], 0));
       const maxTotal = Math.max.apply(null, totals) || 1;
 
-      const W = 560, H = 190, padL = 34, padB = 24, padT = 8, padR = 8;
+      const W = 560, H = 190, padL = 34, padB = 34, padT = 8, padR = 8;
       const plotW = W - padL - padR, plotH = H - padT - padB;
       const barSlot = plotW / days.length;
       const barW = Math.min(24, barSlot * 0.62);
@@ -322,8 +322,10 @@
         });
         if (i % 2 === 0 || days.length <= 10) {
           const lbl = document.createElementNS(svgNS, "text");
-          lbl.setAttribute("x", x + barW / 2); lbl.setAttribute("y", H - 6);
-          lbl.setAttribute("text-anchor", "middle");
+          const lblX = x + barW / 2, lblY = H - padB + 16;
+          lbl.setAttribute("x", lblX); lbl.setAttribute("y", lblY);
+          lbl.setAttribute("text-anchor", "end");
+          lbl.setAttribute("transform", `rotate(-45 ${lblX} ${lblY})`);
           lbl.textContent = fmtDateShort(day);
           svg.appendChild(lbl);
         }
