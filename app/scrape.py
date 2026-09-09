@@ -36,6 +36,18 @@ def _fmt_data(d: datetime.date) -> str:
     return d.strftime("%d/%m/%Y")
 
 
+def _salvar_debug(page: Page, prefixo: str) -> None:
+    """Salva screenshot + HTML da página no diretório de trabalho -- usado
+    quando uma navegação falha, pra dar pra inspecionar depois (ex: como
+    artefato do GitHub Actions) o que o portal realmente mostrou."""
+    try:
+        page.screenshot(path=f"{prefixo}_falha.png", full_page=True)
+        with open(f"{prefixo}_falha.html", "w", encoding="utf-8") as f:
+            f.write(page.content())
+    except Exception:
+        logger.exception("Falha ao salvar debug de %s", prefixo)
+
+
 def _login(page: Page) -> None:
     if not config.PORTAL_EMAIL or not config.PORTAL_SENHA:
         raise ScrapeError("PORTAL_EMAIL e PORTAL_SENHA precisam estar configurados.")
@@ -58,6 +70,7 @@ def _login(page: Page) -> None:
         page.wait_for_load_state("networkidle")
 
     if "/login" in page.url:
+        _salvar_debug(page, "login")
         raise ScrapeError("Login no portal GW Sistemas falhou -- verifique PORTAL_EMAIL/PORTAL_SENHA.")
 
     # Após o login, a SPA ainda redireciona/inicializa a sessão por um
@@ -180,6 +193,7 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
                     break
                 except PlaywrightTimeoutError:
                     if _tentativa == 2:
+                        _salvar_debug(page, "consulta_entrega")
                         raise
                     page.wait_for_timeout(2000)
 
