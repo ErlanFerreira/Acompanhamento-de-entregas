@@ -16,6 +16,7 @@ import re
 
 import requests
 from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from . import config
 
@@ -168,7 +169,20 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
         page = browser.new_page()
         try:
             _login(page)
-            page.goto(CONSULTA_ENTREGA_URL, wait_until="networkidle")
+
+            # Assim como o login, essa navegação às vezes não termina de
+            # carregar o formulário na primeira tentativa (SPA) -- tenta de
+            # novo antes de desistir em vez de estourar timeout direto.
+            for _tentativa in range(3):
+                page.goto(CONSULTA_ENTREGA_URL, wait_until="networkidle")
+                try:
+                    page.wait_for_selector("#tipoFiltro2", timeout=15_000)
+                    break
+                except PlaywrightTimeoutError:
+                    if _tentativa == 2:
+                        raise
+                    page.wait_for_timeout(2000)
+
             page.check("#tipoFiltro2")
             page.uncheck("#chkNaoEntregue")
 
