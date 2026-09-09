@@ -186,8 +186,22 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
             # Assim como o login, essa navegação às vezes não termina de
             # carregar o formulário na primeira tentativa (SPA) -- tenta de
             # novo antes de desistir em vez de estourar timeout direto.
+            # Um caso específico e já confirmado: o portal só permite uma
+            # sessão ativa por login, então se alguém (ex: o próprio dono
+            # da conta) estiver logado ao mesmo tempo no navegador normal,
+            # essa navegação volta com HTTP 401 em vez do formulário.
             for _tentativa in range(3):
-                page.goto(CONSULTA_ENTREGA_URL, wait_until="networkidle")
+                resposta = page.goto(CONSULTA_ENTREGA_URL, wait_until="networkidle")
+                if resposta is not None and resposta.status == 401:
+                    if _tentativa == 2:
+                        _salvar_debug(page, "consulta_entrega")
+                        raise ScrapeError(
+                            "O portal Webtrans recusou a sessão (401). Isso costuma acontecer quando "
+                            "alguém está logado ao mesmo tempo com o mesmo usuário no navegador normal -- "
+                            "espere terminar de usar o portal e tente a consulta de novo."
+                        )
+                    page.wait_for_timeout(5000)
+                    continue
                 try:
                     page.wait_for_selector("#tipoFiltro2", timeout=15_000)
                     break
