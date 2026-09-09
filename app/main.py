@@ -298,7 +298,7 @@ def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
     )
 
     cabecalho_original = list(json.loads(itens[0].linha_original).keys()) if itens else []
-    colunas_novas = ["CT-e", "Status Entrega", "Previsão Entrega", "Data Entrega", "Dias Atraso", "Observação", "Encontrado?"]
+    colunas_novas = ["CT-e", "Status Entrega", "Previsão Entrega", "Data Entrega", "Encontrado?"]
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -313,8 +313,6 @@ def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
             item.status_entrega,
             item.previsao_entrega,
             item.data_entrega,
-            item.dias_atraso,
-            item.observacao,
             "Sim" if item.encontrado else "Não",
         ]
         ws.append(valores_originais + valores_novos)
