@@ -2,12 +2,27 @@
   "use strict";
 
   const fArquivo = document.getElementById("f-arquivo");
-  const colunaWrap = document.getElementById("coluna-wrap");
-  const fColuna = document.getElementById("f-coluna");
   const btnEnviar = document.getElementById("btn-enviar");
   const uploadStatus = document.getElementById("upload-status");
 
   let arquivoSelecionado = null;
+  let colunaDetectada = null;
+
+  function normalizar(s) {
+    return String(s == null ? "" : s)
+      .normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .toLowerCase().trim();
+  }
+
+  function detectarColunaNF(cabecalho) {
+    for (const c of cabecalho) {
+      const n = normalizar(c);
+      if (n.includes("nota fiscal") || n.includes("nota") || n === "nf" || /\bnf\b/.test(n)) {
+        return c;
+      }
+    }
+    return null;
+  }
 
   const STATUS_LABEL = {
     pendente: "Na fila",
@@ -22,6 +37,8 @@
     const file = fArquivo.files[0];
     if (!file) return;
     arquivoSelecionado = file;
+    colunaDetectada = null;
+    btnEnviar.disabled = true;
     uploadStatus.textContent = "Lendo cabeçalho da planilha…";
 
     const reader = new FileReader();
@@ -36,9 +53,14 @@
           uploadStatus.textContent = "Não consegui ler o cabeçalho dessa planilha.";
           return;
         }
-        fColuna.innerHTML = cabecalho.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
-        colunaWrap.style.display = "block";
-        uploadStatus.textContent = "";
+        const coluna = detectarColunaNF(cabecalho);
+        if (!coluna) {
+          uploadStatus.textContent = "Não encontrei uma coluna de nota fiscal nessa planilha.";
+          return;
+        }
+        colunaDetectada = coluna;
+        btnEnviar.disabled = false;
+        uploadStatus.textContent = `Coluna de nota fiscal detectada: "${coluna}".`;
       } catch (err) {
         uploadStatus.textContent = "Erro ao ler o arquivo: " + err.message;
       }
@@ -47,26 +69,26 @@
   });
 
   btnEnviar.addEventListener("click", async function () {
-    if (!arquivoSelecionado) return;
+    if (!arquivoSelecionado || !colunaDetectada) return;
     btnEnviar.disabled = true;
     uploadStatus.textContent = "Enviando…";
     try {
       const fd = new FormData();
       fd.append("arquivo", arquivoSelecionado);
-      fd.append("coluna_nf", fColuna.value);
+      fd.append("coluna_nf", colunaDetectada);
       const resp = await fetch("/api/consultas", { method: "POST", credentials: "same-origin", body: fd });
       const body = await resp.json();
       if (!resp.ok) throw new Error(body.erro || "Falha ao enviar.");
       uploadStatus.textContent = `Consulta enviada (${body.total_itens} NFs). Acompanhe abaixo -- isso pode levar de alguns minutos até cerca de 1 hora para planilhas grandes.`;
       fArquivo.value = "";
-      colunaWrap.style.display = "none";
       arquivoSelecionado = null;
+      colunaDetectada = null;
       loadJobs();
       garantirPolling();
     } catch (e) {
       uploadStatus.textContent = "Erro: " + e.message;
     } finally {
-      btnEnviar.disabled = false;
+      btnEnviar.disabled = true;
     }
   });
 
