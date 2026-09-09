@@ -221,7 +221,7 @@ def _primeira_nf(valor) -> str:
     diferentes), ex.: "59185 / 59186" -- usa só a primeira para a consulta
     (o valor original completo continua preservado em `linha_original`)."""
     texto = str(valor).strip()
-    return re.split(r"[/,;]", texto)[0].strip()
+    return re.split(r"[/,;-]", texto)[0].strip()
 
 
 @app.post("/api/consultas", dependencies=[Depends(require_auth_api)])
