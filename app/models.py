@@ -40,3 +40,41 @@ class Meta(Base):
 
     chave = Column(String(50), primary_key=True)
     valor = Column(String(255))
+
+
+class ConsultaJob(Base):
+    """Um lote de consulta de notas fiscais enviado pelo usuário (upload de
+    planilha) -- processado em segundo plano pelo GitHub Actions."""
+
+    __tablename__ = "consulta_jobs"
+
+    id = Column(Integer, primary_key=True)
+    criado_em = Column(DateTime, default=datetime.datetime.utcnow)
+    nome_arquivo = Column(String(255))
+    coluna_nf = Column(String(255))
+    status = Column(String(20), default="pendente")  # pendente|processando|concluido|erro
+    total_itens = Column(Integer, default=0)
+    processados = Column(Integer, default=0)
+    erro_mensagem = Column(String(500), nullable=True)
+
+
+class ConsultaItem(Base):
+    """Uma linha da planilha enviada, com o resultado da consulta (uma linha
+    de entrada pode gerar mais de uma linha de saída se a NF aparecer em
+    mais de um CT-e)."""
+
+    __tablename__ = "consulta_itens"
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, index=True)
+    linha_idx = Column(Integer)  # posição original na planilha (mantém ordem)
+    linha_original = Column(Text)  # JSON: {cabecalho: valor, ...} da linha inteira
+    nf_numero = Column(String(50))
+    encontrado = Column(Boolean, default=False)
+    cte = Column(String(50), nullable=True)
+    status_entrega = Column(String(255), nullable=True)
+    previsao_entrega = Column(String(10), nullable=True)
+    data_entrega = Column(String(10), nullable=True)
+    dias_atraso = Column(Integer, nullable=True)
+    observacao = Column(Text, nullable=True)
+    erro = Column(String(255), nullable=True)

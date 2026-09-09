@@ -1,0 +1,28 @@
+name: Consultar notas fiscais
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "ID do consulta_jobs a processar"
+        required: true
+
+jobs:
+  consultar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements-sync.txt
+
+      - run: python -m playwright install --with-deps chromium
+
+      - run: python scripts/run_consulta.py "${{ inputs.job_id }}"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PORTAL_EMAIL: ${{ secrets.PORTAL_EMAIL }}
+          PORTAL_SENHA: ${{ secrets.PORTAL_SENHA }}

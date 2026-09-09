@@ -1,19 +1,22 @@
 import datetime
+import io
+import json
 import logging
 from contextlib import asynccontextmanager
 
+import openpyxl
 import requests
-from fastapi import Depends, FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, Request, UploadFile
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from . import config
 from .db import get_db
-from .models import Carga, Meta
+from .models import Carga, ConsultaItem, ConsultaJob, Meta
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
@@ -140,29 +143,180 @@ def api_cargas(
     return {"meta": meta, "records": records}
 
 
-@app.post("/api/sync/run", dependencies=[Depends(require_auth_api)])
-def api_sync_run():
-    """Dispara a sincronização via GitHub Actions (workflow_dispatch).
+def _dispatch_workflow(workflow_file: str, inputs: dict | None = None):
+    """Dispara um workflow do GitHub Actions (workflow_dispatch).
 
-    O app web (Vercel) não roda a automação de navegador diretamente --
-    ela precisa de um Chromium instalado, inviável numa função serverless.
-    Isso só enfileira o job; o resultado aparece no painel após o workflow
-    terminar (~1-2 min), não instantaneamente.
+    O app web (Vercel) não roda a automação de navegador diretamente -- ela
+    precisa de um Chromium instalado, inviável numa função serverless. Isso
+    só enfileira o job no GitHub; quem processa é o runner do Actions.
     """
     if not config.GITHUB_REPO or not config.GITHUB_DISPATCH_TOKEN:
-        return JSONResponse(
-            {"ok": False, "erro": "GITHUB_REPO/GITHUB_DISPATCH_TOKEN não configurados nesta implantação."},
-            status_code=500,
-        )
-    url = f"https://api.github.com/repos/{config.GITHUB_REPO}/actions/workflows/sync.yml/dispatches"
+        return {"ok": False, "erro": "GITHUB_REPO/GITHUB_DISPATCH_TOKEN não configurados nesta implantação."}
+    url = f"https://api.github.com/repos/{config.GITHUB_REPO}/actions/workflows/{workflow_file}/dispatches"
     headers = {
         "Authorization": f"Bearer {config.GITHUB_DISPATCH_TOKEN}",
         "Accept": "application/vnd.github+json",
     }
+    body = {"ref": "main"}
+    if inputs:
+        body["inputs"] = inputs
     try:
-        resp = requests.post(url, headers=headers, json={"ref": "main"}, timeout=15)
+        resp = requests.post(url, headers=headers, json=body, timeout=15)
         if resp.status_code >= 300:
-            return JSONResponse({"ok": False, "erro": f"GitHub respondeu {resp.status_code}: {resp.text[:300]}"}, status_code=502)
-        return {"ok": True, "queued": True}
+            return {"ok": False, "erro": f"GitHub respondeu {resp.status_code}: {resp.text[:300]}"}
+        return {"ok": True}
     except requests.RequestException as exc:
-        return JSONResponse({"ok": False, "erro": str(exc)}, status_code=502)
+        return {"ok": False, "erro": str(exc)}
+
+
+@app.post("/api/sync/run", dependencies=[Depends(require_auth_api)])
+def api_sync_run():
+    """Dispara a sincronização periódica fora do horário agendado.
+
+    Assíncrono -- o resultado aparece no painel após o workflow terminar
+    (~1-2 min), não instantaneamente.
+    """
+    resultado = _dispatch_workflow("sync.yml")
+    if not resultado["ok"]:
+        return JSONResponse(resultado, status_code=502 if "GitHub respondeu" in resultado.get("erro", "") else 500)
+    return {"ok": True, "queued": True}
+
+
+# --------------------------------------------------- consulta de notas ----
+
+@app.get("/consultas", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+def consultas_page(request: Request):
+    return templates.TemplateResponse("consultas.html", {"request": request, "active": "consultas"})
+
+
+def _job_to_dict(job: ConsultaJob) -> dict:
+    return {
+        "id": job.id,
+        "criado_em": job.criado_em.isoformat() if job.criado_em else None,
+        "nome_arquivo": job.nome_arquivo,
+        "status": job.status,
+        "total_itens": job.total_itens,
+        "processados": job.processados,
+        "erro_mensagem": job.erro_mensagem,
+    }
+
+
+@app.get("/api/consultas", dependencies=[Depends(require_auth_api)])
+def api_consultas_list(db: Session = Depends(get_db)):
+    jobs = db.query(ConsultaJob).order_by(ConsultaJob.criado_em.desc()).limit(30).all()
+    return {"jobs": [_job_to_dict(j) for j in jobs]}
+
+
+@app.get("/api/consultas/{job_id}", dependencies=[Depends(require_auth_api)])
+def api_consultas_status(job_id: int, db: Session = Depends(get_db)):
+    job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
+    if not job:
+        return JSONResponse({"erro": "Job não encontrado."}, status_code=404)
+    return _job_to_dict(job)
+
+
+@app.post("/api/consultas", dependencies=[Depends(require_auth_api)])
+async def api_consultas_create(
+    arquivo: UploadFile,
+    coluna_nf: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    conteudo = await arquivo.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(conteudo), data_only=True)
+    except Exception:
+        return JSONResponse({"erro": "Não consegui ler o arquivo. Confirme que é um .xlsx válido."}, status_code=400)
+
+    ws = wb.active
+    linhas = list(ws.iter_rows(values_only=True))
+    if not linhas:
+        return JSONResponse({"erro": "Planilha vazia."}, status_code=400)
+
+    cabecalho = [str(c).strip() if c is not None else "" for c in linhas[0]]
+    if coluna_nf not in cabecalho:
+        return JSONResponse({"erro": f'Coluna "{coluna_nf}" não encontrada na planilha.'}, status_code=400)
+    idx_nf = cabecalho.index(coluna_nf)
+
+    job = ConsultaJob(nome_arquivo=arquivo.filename, coluna_nf=coluna_nf, status="pendente")
+    db.add(job)
+    db.flush()
+
+    total = 0
+    for i, row in enumerate(linhas[1:], start=1):
+        if row is None or all(c is None for c in row):
+            continue
+        nf_valor = row[idx_nf] if idx_nf < len(row) else None
+        if nf_valor is None or str(nf_valor).strip() == "":
+            continue
+        linha_dict = {cabecalho[c]: row[c] for c in range(len(cabecalho)) if cabecalho[c] and c < len(row)}
+        item = ConsultaItem(
+            job_id=job.id,
+            linha_idx=i,
+            linha_original=json.dumps(linha_dict, ensure_ascii=False, default=str),
+            nf_numero=str(nf_valor).strip(),
+        )
+        db.add(item)
+        total += 1
+
+    if total == 0:
+        db.rollback()
+        return JSONResponse({"erro": f'Nenhuma linha com valor preenchido na coluna "{coluna_nf}".'}, status_code=400)
+
+    job.total_itens = total
+    db.commit()
+
+    resultado = _dispatch_workflow("consulta.yml", inputs={"job_id": str(job.id)})
+    if not resultado["ok"]:
+        job.status = "erro"
+        job.erro_mensagem = resultado["erro"][:490]
+        db.commit()
+        return JSONResponse({"erro": resultado["erro"]}, status_code=502)
+
+    return {"ok": True, "job_id": job.id, "total_itens": total}
+
+
+@app.get("/api/consultas/{job_id}/arquivo", dependencies=[Depends(require_auth_api)])
+def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
+    job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
+    if not job:
+        return JSONResponse({"erro": "Job não encontrado."}, status_code=404)
+
+    itens = (
+        db.query(ConsultaItem)
+        .filter(ConsultaItem.job_id == job_id)
+        .order_by(ConsultaItem.linha_idx.asc(), ConsultaItem.id.asc())
+        .all()
+    )
+
+    cabecalho_original = list(json.loads(itens[0].linha_original).keys()) if itens else []
+    colunas_novas = ["CT-e", "Status Entrega", "Previsão Entrega", "Data Entrega", "Dias Atraso", "Observação", "Encontrado?"]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Resultado"
+    ws.append(cabecalho_original + colunas_novas)
+
+    for item in itens:
+        linha = json.loads(item.linha_original)
+        valores_originais = [linha.get(c) for c in cabecalho_original]
+        valores_novos = [
+            item.cte,
+            item.status_entrega,
+            item.previsao_entrega,
+            item.data_entrega,
+            item.dias_atraso,
+            item.observacao,
+            "Sim" if item.encontrado else "Não",
+        ]
+        ws.append(valores_originais + valores_novos)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    nome_saida = f"consulta_{job_id}_resultado.xlsx"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome_saida}"'},
+    )

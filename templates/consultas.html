@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Consulta de Notas — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+  <header class="app-header">
+    <div>
+      <h1>Consulta de Notas Fiscais</h1>
+      <p>Envie uma planilha com os números de NF dos parceiros e receba de volta com status de entrega, previsão e data de entrega.</p>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+  </header>
+
+  <section class="table-section" style="margin-bottom: 20px;">
+    <div class="table-toolbar">
+      <h2>Nova consulta</h2>
+    </div>
+    <div id="upload-area">
+      <label style="display:flex; flex-direction:column; gap:6px; max-width:420px;">
+        Planilha (.xlsx) com os números de NF
+        <input type="file" id="f-arquivo" accept=".xlsx">
+      </label>
+      <div id="coluna-wrap" style="display:none; margin-top:14px; max-width:420px;">
+        <label style="display:flex; flex-direction:column; gap:6px;">
+          Qual coluna tem o número da NF?
+          <select id="f-coluna"></select>
+        </label>
+        <button class="btn-primary" id="btn-enviar" type="button" style="margin-top:12px;">Enviar para consulta</button>
+      </div>
+      <div class="chart-subtitle" id="upload-status" style="margin-top:10px;"></div>
+    </div>
+  </section>
+
+  <section class="table-section">
+    <div class="table-toolbar">
+      <h2>Consultas</h2>
+      <span class="count" id="jobs-count"></span>
+    </div>
+    <div class="table-scroll">
+      <table class="detail" id="jobs-table">
+        <thead>
+          <tr>
+            <th>Enviado em</th>
+            <th>Arquivo</th>
+            <th>Coluna NF</th>
+            <th>Status</th>
+            <th>Progresso</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="jobs-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="/static/consultas.js"></script>
+{% endblock %}

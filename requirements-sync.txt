@@ -1,7 +1,6 @@
-# Dependências extras usadas SÓ pelo job de sincronização (GitHub Actions),
-# que faz automação de navegador -- não usadas pelo app web na Vercel
-# (playwright/openpyxl são pesados demais para o limite de tamanho de
-# função serverless da Vercel, e o app web nem chama esse código).
+# Dependências extras usadas SÓ pelos jobs de automação (GitHub Actions) --
+# não usadas pelo app web na Vercel (o navegador Chromium do Playwright é
+# pesado demais para o limite de tamanho de função serverless da Vercel, e
+# o app web nem chama esse código -- só dispara o workflow).
 -r requirements.txt
-openpyxl==3.1.5
 playwright==1.62.0
