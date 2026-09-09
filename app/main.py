@@ -2,6 +2,7 @@ import datetime
 import io
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 
 import openpyxl
@@ -215,6 +216,14 @@ def api_consultas_status(job_id: int, db: Session = Depends(get_db)):
     return _job_to_dict(job)
 
 
+def _primeira_nf(valor) -> str:
+    """Às vezes a célula tem mais de uma NF (mesmo conhecimento, notas
+    diferentes), ex.: "59185 / 59186" -- usa só a primeira para a consulta
+    (o valor original completo continua preservado em `linha_original`)."""
+    texto = str(valor).strip()
+    return re.split(r"[/,;]", texto)[0].strip()
+
+
 @app.post("/api/consultas", dependencies=[Depends(require_auth_api)])
 async def api_consultas_create(
     arquivo: UploadFile,
@@ -253,7 +262,7 @@ async def api_consultas_create(
             job_id=job.id,
             linha_idx=i,
             linha_original=json.dumps(linha_dict, ensure_ascii=False, default=str),
-            nf_numero=str(nf_valor).strip(),
+            nf_numero=_primeira_nf(nf_valor),
         )
         db.add(item)
         total += 1
