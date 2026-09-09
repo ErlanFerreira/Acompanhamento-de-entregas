@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
+from copy import copy
 
 import openpyxl
 import requests
@@ -246,7 +247,12 @@ async def api_consultas_create(
         return JSONResponse({"erro": f'Coluna "{coluna_nf}" não encontrada na planilha.'}, status_code=400)
     idx_nf = cabecalho.index(coluna_nf)
 
-    job = ConsultaJob(nome_arquivo=arquivo.filename, coluna_nf=coluna_nf, status="pendente")
+    job = ConsultaJob(
+        nome_arquivo=arquivo.filename,
+        coluna_nf=coluna_nf,
+        status="pendente",
+        arquivo_original=conteudo,
+    )
     db.add(job)
     db.flush()
 
@@ -284,11 +290,32 @@ async def api_consultas_create(
     return {"ok": True, "job_id": job.id, "total_itens": total}
 
 
+_COLUNAS_NOVAS = ["CT-e", "Status Entrega", "Previsão Entrega", "Data Entrega", "Encontrado?"]
+
+
+def _clonar_estilo_linha(ws, linha_origem: int, linha_destino: int, num_colunas: int):
+    """Copia a formatação (fonte, borda, preenchimento, alinhamento) de uma
+    linha para outra -- usado ao inserir linhas extras (NF com mais de um
+    CT-e), pra manter o visual igual ao da linha original."""
+    for col in range(1, num_colunas + 1):
+        origem = ws.cell(row=linha_origem, column=col)
+        destino = ws.cell(row=linha_destino, column=col)
+        destino.font = copy(origem.font)
+        destino.border = copy(origem.border)
+        destino.fill = copy(origem.fill)
+        destino.alignment = copy(origem.alignment)
+        destino.number_format = origem.number_format
+    if linha_origem in ws.row_dimensions:
+        ws.row_dimensions[linha_destino].height = ws.row_dimensions[linha_origem].height
+
+
 @app.get("/api/consultas/{job_id}/arquivo", dependencies=[Depends(require_auth_api)])
 def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
     job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
     if not job:
         return JSONResponse({"erro": "Job não encontrado."}, status_code=404)
+    if not job.arquivo_original:
+        return JSONResponse({"erro": "Arquivo original desta consulta não está mais disponível."}, status_code=404)
 
     itens = (
         db.query(ConsultaItem)
@@ -297,25 +324,51 @@ def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
-    cabecalho_original = list(json.loads(itens[0].linha_original).keys()) if itens else []
-    colunas_novas = ["CT-e", "Status Entrega", "Previsão Entrega", "Data Entrega", "Encontrado?"]
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Resultado"
-    ws.append(cabecalho_original + colunas_novas)
-
+    # Agrupa por linha_idx (linha original da planilha) preservando a ordem
+    # de inserção -- cada grupo pode ter mais de um item (NF com mais de um CT-e).
+    grupos: dict[int, list[ConsultaItem]] = {}
     for item in itens:
-        linha = json.loads(item.linha_original)
-        valores_originais = [linha.get(c) for c in cabecalho_original]
-        valores_novos = [
-            item.cte,
-            item.status_entrega,
-            item.previsao_entrega,
-            item.data_entrega,
-            "Sim" if item.encontrado else "Não",
-        ]
-        ws.append(valores_originais + valores_novos)
+        grupos.setdefault(item.linha_idx, []).append(item)
+
+    wb = openpyxl.load_workbook(io.BytesIO(job.arquivo_original))
+    ws = wb.active
+    max_col_original = ws.max_column
+
+    cabecalho_estilo = ws.cell(row=1, column=max_col_original)
+    for offset, titulo in enumerate(_COLUNAS_NOVAS, start=1):
+        celula = ws.cell(row=1, column=max_col_original + offset, value=titulo)
+        celula.font = copy(cabecalho_estilo.font)
+        celula.border = copy(cabecalho_estilo.border)
+        celula.fill = copy(cabecalho_estilo.fill)
+        celula.alignment = copy(cabecalho_estilo.alignment)
+        ws.column_dimensions[celula.column_letter].width = 16
+
+    total_colunas = max_col_original + len(_COLUNAS_NOVAS)
+
+    def _escrever_resultado(linha_planilha: int, item: ConsultaItem):
+        valores = [item.cte, item.status_entrega, item.previsao_entrega, item.data_entrega, "Sim" if item.encontrado else "Não"]
+        for offset, valor in enumerate(valores, start=1):
+            ws.cell(row=linha_planilha, column=max_col_original + offset, value=valor)
+
+    # Processa das últimas linhas para as primeiras: inserir linhas extras
+    # (NF com mais de um CT-e) desloca tudo abaixo, então precisa ir de
+    # baixo pra cima para não bagunçar a posição das linhas ainda não
+    # processadas.
+    for linha_idx in sorted(grupos.keys(), reverse=True):
+        grupo = grupos[linha_idx]
+        linha_planilha = linha_idx + 1  # linha 1 é o cabeçalho
+        primeiro, *extras = grupo
+        _escrever_resultado(linha_planilha, primeiro)
+
+        valores_originais = [ws.cell(row=linha_planilha, column=c).value for c in range(1, max_col_original + 1)]
+        insercao = linha_planilha + 1
+        for extra in extras:
+            ws.insert_rows(insercao)
+            _clonar_estilo_linha(ws, linha_planilha, insercao, total_colunas)
+            for c, valor in enumerate(valores_originais, start=1):
+                ws.cell(row=insercao, column=c, value=valor)
+            _escrever_resultado(insercao, extra)
+            insercao += 1
 
     buffer = io.BytesIO()
     wb.save(buffer)

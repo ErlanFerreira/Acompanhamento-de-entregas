@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, LargeBinary, String, Text
 
 from .db import Base
 
@@ -56,6 +56,10 @@ class ConsultaJob(Base):
     total_itens = Column(Integer, default=0)
     processados = Column(Integer, default=0)
     erro_mensagem = Column(String(500), nullable=True)
+    # Bytes originais do .xlsx enviado -- guardados pra gerar o resultado
+    # final preservando a formatação (cores, fontes, larguras) da planilha
+    # que o parceiro mandou, em vez de criar uma planilha nova do zero.
+    arquivo_original = Column(LargeBinary, nullable=True)
 
 
 class ConsultaItem(Base):
