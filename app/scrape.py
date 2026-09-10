@@ -36,6 +36,29 @@ def _fmt_data(d: datetime.date) -> str:
     return d.strftime("%d/%m/%Y")
 
 
+def _logout(page: Page) -> None:
+    """Desconecta explicitamente a sessão antes de fechar o navegador.
+
+    Por que isso existe: o portal só permite uma sessão ativa por login, e
+    antes disso a automação só fechava o navegador sem avisar o servidor --
+    deixando sessões "penduradas" que competiam com o próprio usuário e com
+    execuções seguintes da automação. O botão "Sair" só existe no menu
+    principal (SPA) -- as telas JSP antigas (ex: Consulta Entrega) não têm
+    essa barra lateral, então navega de volta pro menu antes.
+    """
+    try:
+        page.goto(f"{PORTAL_URL}/menu", wait_until="networkidle")
+        try:
+            page.click("text=Pular tour", timeout=2000)
+        except PlaywrightTimeoutError:
+            pass
+        page.click(".logout-item", timeout=5000)
+        page.click('button:has-text("Confirmar")', timeout=5000)
+        page.wait_for_timeout(1500)
+    except Exception:
+        logger.exception("Falha ao tentar fazer logout explícito (ignorando).")
+
+
 def _salvar_debug(page: Page, prefixo: str) -> None:
     """Salva screenshot + HTML da página no diretório de trabalho -- usado
     quando uma navegação falha, pra dar pra inspecionar depois (ex: como
@@ -112,6 +135,7 @@ def baixar_relatorio_pendencias(data_inicial: datetime.date, data_final: datetim
             if not link:
                 raise ScrapeError("Não encontrei o link de download do relatório gerado.")
         finally:
+            _logout(page)
             browser.close()
 
     resp = requests.get(link, timeout=180)
@@ -196,9 +220,8 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
                     if _tentativa == 2:
                         _salvar_debug(page, "consulta_entrega")
                         raise ScrapeError(
-                            "O portal Webtrans recusou a sessão (401). Isso costuma acontecer quando "
-                            "alguém está logado ao mesmo tempo com o mesmo usuário no navegador normal -- "
-                            "espere terminar de usar o portal e tente a consulta de novo."
+                            "O portal Webtrans recusou a sessão (401) ao abrir a tela de Consulta Entrega. "
+                            "Pode ser sessão duplicada ou bloqueio temporário -- tente de novo em alguns minutos."
                         )
                     page.wait_for_timeout(5000)
                     continue
@@ -228,6 +251,7 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
                 if progresso:
                     progresso(i, total)
         finally:
+            _logout(page)
             browser.close()
 
     return resultados
