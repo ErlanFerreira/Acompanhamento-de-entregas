@@ -102,6 +102,20 @@ def _login(page: Page) -> None:
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(2000)
 
+    # Cuidado: com senha ERRADA o portal ainda redireciona pra fora de
+    # "/login" (ex: pra "/home"), então a checagem de URL acima sozinha não
+    # é suficiente -- confirma autenticação real indo pro menu e checando um
+    # elemento que só existe logado (o "Sair" do menu principal).
+    page.goto(f"{PORTAL_URL}/menu", wait_until="networkidle")
+    try:
+        page.wait_for_selector(".logout-item", timeout=10_000)
+    except PlaywrightTimeoutError:
+        _salvar_debug(page, "login")
+        raise ScrapeError(
+            "Login no portal GW Sistemas não autenticou de verdade (a página redireciona, mas não "
+            "mostra o menu logado) -- confira se PORTAL_EMAIL/PORTAL_SENHA estão corretos."
+        )
+
 
 def baixar_relatorio_pendencias(data_inicial: datetime.date, data_final: datetime.date) -> bytes:
     """Faz login no portal Webtrans, gera o relatório personalizado
