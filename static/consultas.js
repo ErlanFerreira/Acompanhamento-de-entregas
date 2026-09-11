@@ -98,6 +98,17 @@
     return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
   }
 
+  function renderProgresso(j) {
+    if (!j.total_itens) return "—";
+    const pct = Math.max(0, Math.min(100, Math.round((j.processados / j.total_itens) * 100)));
+    return (
+      '<div class="progress-wrap">' +
+        '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
+        '<span class="progress-label">' + j.processados + '/' + j.total_itens + '</span>' +
+      '</div>'
+    );
+  }
+
   function renderJobs(jobs) {
     document.getElementById("jobs-count").textContent = jobs.length ? jobs.length + " consulta(s)" : "";
     const tbody = document.getElementById("jobs-body");
@@ -106,7 +117,7 @@
       return;
     }
     tbody.innerHTML = jobs.map(j => {
-      const progresso = j.total_itens ? `${j.processados} / ${j.total_itens}` : "—";
+      const progresso = renderProgresso(j);
       let acao = "—";
       if (j.status === "concluido") {
         acao = `<a class="btn" href="/api/consultas/${j.id}/arquivo">Baixar planilha</a>`;
