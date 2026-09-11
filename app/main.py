@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from copy import copy
 
 import openpyxl
+from openpyxl.styles import PatternFill
 import requests
 from fastapi import Depends, FastAPI, Form, Request, UploadFile
 from fastapi.exception_handlers import http_exception_handler
@@ -291,6 +292,8 @@ async def api_consultas_create(
 
 
 _COLUNAS_NOVAS = ["CT-e", "Status Entrega", "Previsão Entrega", "Data Entrega", "Encontrado?"]
+# Azul, Ênfase 1, mais claro 60% -- cor padrão do tema do Excel/Office.
+_FILL_DADOS_GW = PatternFill(fill_type="solid", start_color="FFB4C7E7", end_color="FFB4C7E7")
 
 
 def _clonar_estilo_linha(ws, linha_origem: int, linha_destino: int, num_colunas: int):
@@ -348,7 +351,8 @@ def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
     def _escrever_resultado(linha_planilha: int, item: ConsultaItem):
         valores = [item.cte, item.status_entrega, item.previsao_entrega, item.data_entrega, "Sim" if item.encontrado else "Não"]
         for offset, valor in enumerate(valores, start=1):
-            ws.cell(row=linha_planilha, column=max_col_original + offset, value=valor)
+            celula = ws.cell(row=linha_planilha, column=max_col_original + offset, value=valor)
+            celula.fill = _FILL_DADOS_GW
 
     # Processa das últimas linhas para as primeiras: inserir linhas extras
     # (NF com mais de um CT-e) desloca tudo abaixo, então precisa ir de
