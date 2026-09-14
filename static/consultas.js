@@ -11,13 +11,18 @@
   function normalizar(s) {
     return String(s == null ? "" : s)
       .normalize("NFD").replace(/[̀-ͯ]/g, "")
-      .toLowerCase().trim();
+      .toLowerCase()
+      // Trata "-", "_" e "/" como separador de palavra (ex: "Numero-NF",
+      // "Nota_Fiscal", "NF/Pedido"), não como parte do texto.
+      .replace(/[-_/]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
   function detectarColunaNF(cabecalho) {
     for (const c of cabecalho) {
       const n = normalizar(c);
-      if (n.includes("nota fiscal") || n.includes("nota") || n === "nf" || /\bnf\b/.test(n)) {
+      if (n.includes("nota fiscal") || /\bnota\b/.test(n) || /\bnf\b/.test(n)) {
         return c;
       }
     }
