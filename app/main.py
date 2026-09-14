@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import re
+import unicodedata
 from contextlib import asynccontextmanager
 from copy import copy
 
@@ -258,6 +259,39 @@ def _primeira_nf(valor) -> str:
     return re.split(r"[/,;-]", texto)[0].strip()
 
 
+def _normalizar_cabecalho(s) -> str:
+    texto = unicodedata.normalize("NFD", str(s or ""))
+    texto = "".join(c for c in texto if unicodedata.category(c) != "Mn")
+    texto = texto.lower()
+    texto = re.sub(r"[-_/]+", " ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def _detectar_coluna(cabecalho: list[str], testar) -> str | None:
+    for c in cabecalho:
+        if testar(_normalizar_cabecalho(c)):
+            return c
+    return None
+
+
+def _detectar_coluna_serie(cabecalho: list[str]) -> str | None:
+    return _detectar_coluna(cabecalho, lambda n: re.search(r"\bserie\b", n) is not None)
+
+
+def _detectar_coluna_remetente(cabecalho: list[str]) -> str | None:
+    return _detectar_coluna(cabecalho, lambda n: re.search(r"\bremetente\b", n) is not None)
+
+
+def _detectar_coluna_destinatario(cabecalho: list[str]) -> str | None:
+    def testar(n: str) -> bool:
+        if re.search(r"\bdestinatario\b", n):
+            return True
+        # Padrão comum em exportações do próprio GW: "NM_ENTREGA_..._CLIENTES".
+        return "entrega" in n and "cliente" in n
+
+    return _detectar_coluna(cabecalho, testar)
+
+
 @app.post("/api/consultas", dependencies=[Depends(require_auth_api)])
 async def api_consultas_create(
     arquivo: UploadFile,
@@ -283,6 +317,9 @@ async def api_consultas_create(
     job = ConsultaJob(
         nome_arquivo=arquivo.filename,
         coluna_nf=coluna_nf,
+        coluna_serie=_detectar_coluna_serie(cabecalho),
+        coluna_remetente=_detectar_coluna_remetente(cabecalho),
+        coluna_destinatario=_detectar_coluna_destinatario(cabecalho),
         status="pendente",
         arquivo_original=conteudo,
     )

@@ -13,6 +13,7 @@ Roda via Playwright (precisa de `playwright install chromium` previamente).
 import datetime
 import logging
 import re
+import unicodedata
 
 import requests
 from playwright.sync_api import Page, sync_playwright
@@ -159,7 +160,7 @@ def baixar_relatorio_pendencias(data_inicial: datetime.date, data_final: datetim
 
 # ------------------------------------------------- consulta por NF ----
 
-_BLOCO_CTE_RE = re.compile(r"(\d{4,10}/\d{1,3})")
+_BLOCO_CTE_RE = re.compile(r"(\d{4,10}/[0-9A-Za-z]{1,3})")
 _STATUS_RE = re.compile(r"STATUS:\s*(.*?)\s*Notas Fiscais:", re.DOTALL)
 _PREVISAO_RE = re.compile(r"Previsão entrega:\s*(\d{2}/\d{2}/\d{4})")
 _ENTREGA_RE = re.compile(r"(?<!Previsão )Entrega:\s*(\d{2}/\d{2}/\d{4})?\s*às:\s*([\d:]*)\s*OBS:\s*(.*)")
@@ -202,18 +203,43 @@ def _parse_resultado(texto: str) -> list[dict]:
     return resultados
 
 
-def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, list[dict]]:
-    """Faz login uma vez e consulta cada número de NF na tela "Consulta
-    Entrega" do portal Webtrans, reaproveitando a mesma página/sessão.
+def _extrair_nomes_por_cte(html: str) -> dict[str, dict]:
+    """Extrai remetente/destinatário por CT-e a partir do HTML bruto da
+    tabela de resultados -- reaproveita os mesmos padrões usados pelo bot
+    de e-mail (ver `_LINHA_RE`/`_POPIMG_RE` mais abaixo neste arquivo), já
+    que é a mesma tela e a mesma estrutura de tabela."""
+    popimgs = {pid: pnum for pid, pnum, _data, _filial in _POPIMG_RE.findall(html)}
+    nomes: dict[str, dict] = {}
+    for idconhecimento, _filial_col, _consig, remetente, destinatario in _LINHA_RE.findall(html):
+        cte = popimgs.get(idconhecimento)
+        if cte:
+            nomes[cte] = {"remetente": remetente.strip(), "destinatario": destinatario.strip()}
+    return nomes
 
-    Retorna um dict {numero_nf: [resultado, ...]} -- lista vazia se a NF não
-    foi encontrada, mais de um item se a NF aparece em mais de um CT-e.
+
+def consultar_notas_fiscais(consultas: list[dict], progresso=None) -> dict[tuple, list[dict]]:
+    """Faz login uma vez e consulta cada (número, série) de NF na tela
+    "Consulta Entrega" do portal Webtrans, reaproveitando a mesma
+    página/sessão.
+
+    `consultas`: lista de {"numero": str, "serie": str | None} -- quando a
+    planilha enviada tem uma coluna de série, ela é usada pra restringir a
+    busca diretamente no portal (o número da NF sozinho não é único --
+    pode haver documentos diferentes, de clientes diferentes, com o mesmo
+    número em séries diferentes).
+
+    Retorna um dict {(numero, serie): [resultado, ...]} -- lista vazia se
+    não foi encontrado, mais de um item se aparece em mais de um CT-e.
+    Cada resultado também inclui "remetente"/"destinatario" (podem vir
+    `None` se não for possível extrair -- ex: CT-e que não seja do tipo
+    "Normal"), pra quem chamar poder validar se o achado realmente
+    pertence ao cliente esperado antes de aceitar.
 
     `progresso`, se informado, é chamado como progresso(i, total) após cada
     consulta (para reportar andamento de lotes grandes).
     """
-    resultados: dict[str, list[dict]] = {}
-    total = len(numeros_nf)
+    resultados: dict[tuple, list[dict]] = {}
+    total = len(consultas)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -251,17 +277,27 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
             page.check("#tipoFiltro2")
             page.uncheck("#chkNaoEntregue")
 
-            for i, numero in enumerate(numeros_nf, start=1):
+            for i, item in enumerate(consultas, start=1):
+                numero = item["numero"]
+                serie = item.get("serie")
+                chave = (numero, serie)
                 try:
                     page.fill("#valorConsultaNota", str(numero))
+                    page.fill("#serie_nf", str(serie) if serie else "")
                     page.click("#visualizar")
                     page.wait_for_timeout(1200)
                     page.wait_for_load_state("networkidle")
                     texto = page.eval_on_selector("#formBx", "el => el.innerText")
-                    resultados[numero] = _parse_resultado(texto)
+                    resultado = _parse_resultado(texto)
+                    nomes_por_cte = _extrair_nomes_por_cte(page.content())
+                    for r in resultado:
+                        nomes = nomes_por_cte.get(r["cte"]) or {}
+                        r["remetente"] = nomes.get("remetente")
+                        r["destinatario"] = nomes.get("destinatario")
+                    resultados[chave] = resultado
                 except Exception:
-                    logger.exception("Falha ao consultar NF %s", numero)
-                    resultados[numero] = []
+                    logger.exception("Falha ao consultar NF %s (série %s)", numero, serie)
+                    resultados[chave] = []
                 if progresso:
                     progresso(i, total)
         finally:
@@ -269,3 +305,48 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
             browser.close()
 
     return resultados
+
+
+# --------------------- comparação de nome de empresa (remetente/destinatário) ----
+#
+# Usado tanto por `consultar_notas_fiscais` (validar que o CT-e achado é do
+# cliente certo da planilha) quanto pelo bot de resposta por e-mail
+# (app/email_bot.py, que também precisa baixar a imagem do comprovante --
+# ver `consultar_e_confirmar_para_email` mais abaixo).
+
+_LINHA_RE = re.compile(
+    # A tabela alterna "CelulaZebra1"/"CelulaZebra2" por linha (efeito
+    # zebra) -- aceita as duas, senão metade das linhas (as pares) fica de
+    # fora silenciosamente.
+    r"CelulaZebra[12]\"[^>]*>\s*<td>\s*<img[^>]*plus_(\d+)\".*?"
+    r"<td>\s*Normal</td>\s*<td>\s*(\w+)</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>",
+    re.DOTALL,
+)
+_POPIMG_RE = re.compile(r"popImg\('(\d+)','([^']+)','([^']+)','([^']+)'\)")
+
+_SUFIXOS_EMPRESA = {
+    "LTDA", "SA", "S/A", "ME", "EPP", "EIRELI", "MEI", "IND", "INDUSTRIA",
+    "COMERCIO", "COM", "DE", "DO", "DA", "E",
+}
+
+
+def _normalizar_nome(s: str) -> str:
+    """Maiúsculas, sem acento, sem espaço/pontuação, descartando sufixos
+    societários comuns -- pra comparar "Iquine" com "TINTAS IQUINE
+    INDUSTRIA E COMERCIO LTDA" de forma tolerante."""
+    sem_acento = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    palavras = [p for p in re.split(r"[^A-Za-z0-9]+", sem_acento.upper()) if p]
+    palavras = [p for p in palavras if p not in _SUFIXOS_EMPRESA]
+    return "".join(palavras)
+
+
+def empresa_confere(candidatos: list[str], remetente: str, destinatario: str) -> bool:
+    """True se algum dos nomes candidatos (ex: extraído do e-mail do
+    solicitante) aparecer como remetente OU destinatário do CT-e."""
+    alvo = _normalizar_nome(remetente) + "|" + _normalizar_nome(destinatario)
+    for cand in candidatos:
+        cnorm = _normalizar_nome(cand)
+        if len(cnorm) >= 4 and cnorm in alvo:
+            return True
+    return False
+
