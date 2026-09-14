@@ -22,7 +22,7 @@
   function detectarColunaNF(cabecalho) {
     for (const c of cabecalho) {
       const n = normalizar(c);
-      if (n.includes("nota fiscal") || /\bnota\b/.test(n) || /\bnf\b/.test(n)) {
+      if (/\bnotas?\b/.test(n) || /\bnf\b/.test(n)) {
         return c;
       }
     }
