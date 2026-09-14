@@ -24,9 +24,11 @@ from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
     create_session_cookie,
+    create_share_token,
     is_authenticated,
     require_auth_api,
     require_auth_page,
+    verify_share_token,
 )
 from .seed import init_db_and_seed
 
@@ -88,6 +90,25 @@ def logout():
     resp = RedirectResponse(url="/login", status_code=303)
     resp.delete_cookie(COOKIE_NAME)
     return resp
+
+
+@app.get("/acesso/{token}")
+def acesso_via_link(token: str):
+    """Login automático via link compartilhável (sem digitar senha) -- ver
+    botão "Copiar link de acesso" no painel."""
+    if not verify_share_token(token):
+        return RedirectResponse(url="/login")
+    session_token = create_session_cookie()
+    resp = RedirectResponse(url="/painel", status_code=303)
+    resp.set_cookie(COOKIE_NAME, session_token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/api/link-acesso", dependencies=[Depends(require_auth_api)])
+def api_link_acesso(request: Request):
+    token = create_share_token()
+    url = str(request.base_url).rstrip("/") + f"/acesso/{token}"
+    return {"url": url}
 
 
 # ------------------------------------------------------------- painel -----
