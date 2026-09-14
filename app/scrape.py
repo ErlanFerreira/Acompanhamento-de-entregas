@@ -317,9 +317,12 @@ def consultar_notas_fiscais(consultas: list[dict], progresso=None) -> dict[tuple
 _LINHA_RE = re.compile(
     # A tabela alterna "CelulaZebra1"/"CelulaZebra2" por linha (efeito
     # zebra) -- aceita as duas, senão metade das linhas (as pares) fica de
-    # fora silenciosamente.
+    # fora silenciosamente. A coluna "Filial" também pode ter mais de uma
+    # palavra (ex: "Filial GRU", não só "MATRIZ") -- usava `\w+`, que não
+    # casa espaço, e aí o ".*?" vazava pra linha seguinte da tabela e
+    # misturava o remetente/destinatário de um CT-e com o de outro.
     r"CelulaZebra[12]\"[^>]*>\s*<td>\s*<img[^>]*plus_(\d+)\".*?"
-    r"<td>\s*Normal</td>\s*<td>\s*(\w+)</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>",
+    r"<td>\s*Normal</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>",
     re.DOTALL,
 )
 _POPIMG_RE = re.compile(r"popImg\('(\d+)','([^']+)','([^']+)','([^']+)'\)")
@@ -349,4 +352,3 @@ def empresa_confere(candidatos: list[str], remetente: str, destinatario: str) ->
         if len(cnorm) >= 4 and cnorm in alvo:
             return True
     return False
-
