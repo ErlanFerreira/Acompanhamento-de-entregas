@@ -72,7 +72,7 @@
     });
 
     const state = {
-      datePreset: "all",
+      datePreset: "7",
       uf: "all",
       statuses: new Set(["good", "warning", "critical", "serious"]),
       search: "",
@@ -114,9 +114,9 @@
       searchDebounce = setTimeout(() => { state.search = v.trim().toLowerCase(); render(); }, 180);
     });
     document.getElementById("f-reset").addEventListener("click", function () {
-      state.datePreset = "all"; state.uf = "all"; state.search = ""; state.onlyOpen = true;
+      state.datePreset = "7"; state.uf = "all"; state.search = ""; state.onlyOpen = true;
       state.statuses = new Set(["good", "warning", "critical", "serious"]);
-      datePresetEl.value = "all"; dateFromEl.style.display = "none"; dateToEl.style.display = "none"; dateSepEl.style.display = "none";
+      datePresetEl.value = "7"; dateFromEl.style.display = "none"; dateToEl.style.display = "none"; dateSepEl.style.display = "none";
       ufSelect.value = "all"; document.getElementById("f-search").value = "";
       document.getElementById("t-only-open").checked = true;
       document.querySelectorAll("#f-status .chip").forEach(c => c.classList.add("active"));
