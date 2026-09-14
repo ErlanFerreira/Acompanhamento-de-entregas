@@ -239,6 +239,17 @@ def api_consultas_status(job_id: int, db: Session = Depends(get_db)):
     return _job_to_dict(job)
 
 
+@app.delete("/api/consultas/{job_id}", dependencies=[Depends(require_auth_api)])
+def api_consultas_delete(job_id: int, db: Session = Depends(get_db)):
+    job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
+    if not job:
+        return JSONResponse({"erro": "Job não encontrado."}, status_code=404)
+    db.query(ConsultaItem).filter(ConsultaItem.job_id == job_id).delete()
+    db.delete(job)
+    db.commit()
+    return {"ok": True}
+
+
 def _primeira_nf(valor) -> str:
     """Às vezes a célula tem mais de uma NF (mesmo conhecimento, notas
     diferentes), ex.: "59185 / 59186" -- usa só a primeira para a consulta

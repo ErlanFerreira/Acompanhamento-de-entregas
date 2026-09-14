@@ -122,7 +122,8 @@
       if (j.status === "concluido") {
         acao = `<a class="btn" href="/api/consultas/${j.id}/arquivo">Baixar planilha</a>`;
       } else if (j.status === "erro") {
-        acao = `<span title="${esc(j.erro_mensagem || "")}" class="flag-no">ver erro</span>`;
+        acao = `<span title="${esc(j.erro_mensagem || "")}" class="flag-no">ver erro</span> ` +
+          `<button type="button" class="btn btn-excluir" data-job-id="${j.id}">Excluir</button>`;
       }
       return "<tr>" +
         "<td>" + fmtData(j.criado_em) + "</td>" +
@@ -134,6 +135,22 @@
         "</tr>";
     }).join("");
   }
+
+  document.getElementById("jobs-body").addEventListener("click", async function (e) {
+    const btn = e.target.closest(".btn-excluir");
+    if (!btn) return;
+    if (!confirm("Excluir essa consulta com erro? Não dá pra desfazer.")) return;
+    btn.disabled = true;
+    try {
+      const resp = await fetch(`/api/consultas/${btn.dataset.jobId}`, { method: "DELETE", credentials: "same-origin" });
+      if (resp.status === 401) { window.location.href = "/login"; return; }
+      if (!resp.ok) throw new Error("Falha ao excluir.");
+      loadJobs();
+    } catch (e) {
+      alert("Erro: " + e.message);
+      btn.disabled = false;
+    }
+  });
 
   async function loadJobs() {
     const resp = await fetch("/api/consultas", { credentials: "same-origin" });
