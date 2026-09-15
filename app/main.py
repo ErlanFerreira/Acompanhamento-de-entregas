@@ -299,6 +299,12 @@ def _detectar_coluna_tomador(cabecalho: list[str]) -> str | None:
     return _detectar_coluna(cabecalho, lambda n: re.search(r"\btomador\b|\bpagador\b", n) is not None)
 
 
+def _detectar_coluna_cliente(cabecalho: list[str]) -> str | None:
+    """Fallback quando a planilha nem separa remetente/destinatário/tomador
+    -- só tem uma coluna genérica "Cliente" dizendo de quem é o embarque."""
+    return _detectar_coluna(cabecalho, lambda n: re.search(r"\bcliente\b", n) is not None)
+
+
 @app.post("/api/consultas", dependencies=[Depends(require_auth_api)])
 async def api_consultas_create(
     arquivo: UploadFile,
@@ -327,6 +333,7 @@ async def api_consultas_create(
         coluna_remetente=_detectar_coluna_remetente(cabecalho),
         coluna_destinatario=_detectar_coluna_destinatario(cabecalho),
         coluna_tomador=_detectar_coluna_tomador(cabecalho),
+        coluna_cliente=_detectar_coluna_cliente(cabecalho),
         status="pendente",
         arquivo_original=conteudo,
     )
