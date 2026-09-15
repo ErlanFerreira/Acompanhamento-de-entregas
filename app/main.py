@@ -275,7 +275,16 @@ def _detectar_coluna(cabecalho: list[str], testar) -> str | None:
 
 
 def _detectar_coluna_serie(cabecalho: list[str]) -> str | None:
-    return _detectar_coluna(cabecalho, lambda n: re.search(r"\bserie\b", n) is not None)
+    def testar(n: str) -> bool:
+        if not re.search(r"\bserie\b", n):
+            return False
+        # Evita falso positivo em colunas tipo "Serie/Numero CTRC" -- ali
+        # "série" é do CT-e/conhecimento, não da nota fiscal.
+        if re.search(r"\bctrc\b|\bcte\b|\bconhecimento\b", n):
+            return False
+        return True
+
+    return _detectar_coluna(cabecalho, testar)
 
 
 def _detectar_coluna_remetente(cabecalho: list[str]) -> str | None:
