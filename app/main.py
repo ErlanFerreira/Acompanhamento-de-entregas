@@ -217,7 +217,10 @@ def consultas_page(request: Request):
 def _job_to_dict(job: ConsultaJob) -> dict:
     return {
         "id": job.id,
-        "criado_em": job.criado_em.isoformat() if job.criado_em else None,
+        # "Z" no final: criado_em é gravado em UTC (datetime.utcnow), mas
+        # sem isso o navegador interpreta a string como horário local e
+        # exibe 3h adiantado (sem descontar o fuso de Brasília).
+        "criado_em": job.criado_em.isoformat() + "Z" if job.criado_em else None,
         "nome_arquivo": job.nome_arquivo,
         "status": job.status,
         "total_itens": job.total_itens,
