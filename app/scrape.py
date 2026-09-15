@@ -217,29 +217,26 @@ def _extrair_nomes_por_cte(html: str) -> dict[str, dict]:
     return nomes
 
 
-def consultar_notas_fiscais(consultas: list[dict], progresso=None) -> dict[tuple, list[dict]]:
-    """Faz login uma vez e consulta cada (número, série) de NF na tela
-    "Consulta Entrega" do portal Webtrans, reaproveitando a mesma
-    página/sessão.
+def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, list[dict]]:
+    """Faz login uma vez e consulta cada número de NF na tela "Consulta
+    Entrega" do portal Webtrans, reaproveitando a mesma página/sessão.
 
-    `consultas`: lista de {"numero": str, "serie": str | None} -- quando a
-    planilha enviada tem uma coluna de série, ela é usada pra restringir a
-    busca diretamente no portal (o número da NF sozinho não é único --
-    pode haver documentos diferentes, de clientes diferentes, com o mesmo
-    número em séries diferentes).
+    Busca em todas as séries -- a série do CT-e no GW representa a filial
+    (ou "M" de minuta), não tem relação com a série informada em planilhas
+    de parceiros, então não faz sentido restringir por ela.
 
-    Retorna um dict {(numero, serie): [resultado, ...]} -- lista vazia se
-    não foi encontrado, mais de um item se aparece em mais de um CT-e.
-    Cada resultado também inclui "remetente"/"destinatario" (podem vir
-    `None` se não for possível extrair -- ex: CT-e que não seja do tipo
-    "Normal"), pra quem chamar poder validar se o achado realmente
-    pertence ao cliente esperado antes de aceitar.
+    Retorna um dict {numero_nf: [resultado, ...]} -- lista vazia se não foi
+    encontrado, mais de um item se aparece em mais de um CT-e. Cada
+    resultado também inclui "remetente"/"destinatario" (podem vir `None`
+    se não for possível extrair -- ex: CT-e que não seja do tipo "Normal"),
+    pra quem chamar poder validar se o achado realmente pertence ao
+    cliente esperado antes de aceitar.
 
     `progresso`, se informado, é chamado como progresso(i, total) após cada
     consulta (para reportar andamento de lotes grandes).
     """
-    resultados: dict[tuple, list[dict]] = {}
-    total = len(consultas)
+    resultados: dict[str, list[dict]] = {}
+    total = len(numeros_nf)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -277,13 +274,9 @@ def consultar_notas_fiscais(consultas: list[dict], progresso=None) -> dict[tuple
             page.check("#tipoFiltro2")
             page.uncheck("#chkNaoEntregue")
 
-            for i, item in enumerate(consultas, start=1):
-                numero = item["numero"]
-                serie = item.get("serie")
-                chave = (numero, serie)
+            for i, numero in enumerate(numeros_nf, start=1):
                 try:
                     page.fill("#valorConsultaNota", str(numero))
-                    page.fill("#serie_nf", str(serie) if serie else "")
                     page.click("#visualizar")
                     page.wait_for_timeout(1200)
                     page.wait_for_load_state("networkidle")
@@ -294,10 +287,10 @@ def consultar_notas_fiscais(consultas: list[dict], progresso=None) -> dict[tuple
                         nomes = nomes_por_cte.get(r["cte"]) or {}
                         r["remetente"] = nomes.get("remetente")
                         r["destinatario"] = nomes.get("destinatario")
-                    resultados[chave] = resultado
+                    resultados[numero] = resultado
                 except Exception:
-                    logger.exception("Falha ao consultar NF %s (série %s)", numero, serie)
-                    resultados[chave] = []
+                    logger.exception("Falha ao consultar NF %s", numero)
+                    resultados[numero] = []
                 if progresso:
                     progresso(i, total)
         finally:

@@ -24,17 +24,6 @@ def _linha_dict(item: ConsultaItem) -> dict:
         return {}
 
 
-def _chave_item(item: ConsultaItem, job: ConsultaJob) -> tuple:
-    """(numero, serie) -- serie só entra se a planilha tiver essa coluna
-    detectada e a linha tiver valor preenchido nela."""
-    serie = None
-    if job.coluna_serie:
-        valor = _linha_dict(item).get(job.coluna_serie)
-        if valor not in (None, ""):
-            serie = str(valor).strip()
-    return (item.nf_numero, serie)
-
-
 def _nomes_esperados(item: ConsultaItem, job: ConsultaJob) -> list[str]:
     """Remetente/destinatário que a própria planilha diz pra essa linha --
     usado pra confirmar que o CT-e achado é mesmo desse cliente."""
@@ -80,28 +69,21 @@ def main(job_id: int):
         db.commit()
 
         itens = db.query(ConsultaItem).filter(ConsultaItem.job_id == job_id).all()
-
-        consultas_unicas: dict[tuple, dict] = {}
-        for item in itens:
-            if not item.nf_numero:
-                continue
-            chave = _chave_item(item, job)
-            consultas_unicas.setdefault(chave, {"numero": chave[0], "serie": chave[1]})
+        numeros_unicos = sorted({item.nf_numero for item in itens if item.nf_numero})
 
         def progresso(i, total):
             job.processados = i
             db.commit()
             print(f"{i}/{total} NFs consultadas")
 
-        resultados = consultar_notas_fiscais(list(consultas_unicas.values()), progresso=progresso)
+        resultados = consultar_notas_fiscais(numeros_unicos, progresso=progresso)
 
         for item in itens:
             if not item.nf_numero:
                 item.encontrado = False
                 continue
 
-            chave = _chave_item(item, job)
-            matches = resultados.get(chave, [])
+            matches = resultados.get(item.nf_numero, [])
             matches = _filtrar_por_parceiro(matches, _nomes_esperados(item, job))
             if not matches:
                 item.encontrado = False
