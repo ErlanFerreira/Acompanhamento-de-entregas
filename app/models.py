@@ -54,11 +54,12 @@ class ConsultaJob(Base):
     coluna_nf = Column(String(255))
     # Detectadas automaticamente no cabeçalho, se existirem -- usadas pra
     # validar que o CT-e achado realmente pertence ao cliente da linha
-    # (remetente/destinatário), já que o número da NF sozinho não é único.
-    # Ficam `None` quando a planilha não tem essas colunas -- nesse caso,
-    # mantém o comportamento antigo (sem validação).
+    # (remetente/destinatário/tomador do serviço), já que o número da NF
+    # sozinho não é único. Ficam `None` quando a planilha não tem essas
+    # colunas -- nesse caso, mantém o comportamento antigo (sem validação).
     coluna_remetente = Column(String(255), nullable=True)
     coluna_destinatario = Column(String(255), nullable=True)
+    coluna_tomador = Column(String(255), nullable=True)
     status = Column(String(20), default="pendente")  # pendente|processando|concluido|erro
     total_itens = Column(Integer, default=0)
     processados = Column(Integer, default=0)
@@ -89,4 +90,3 @@ class ConsultaItem(Base):
     dias_atraso = Column(Integer, nullable=True)
     observacao = Column(Text, nullable=True)
     erro = Column(String(255), nullable=True)
-

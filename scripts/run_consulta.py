@@ -25,13 +25,15 @@ def _linha_dict(item: ConsultaItem) -> dict:
 
 
 def _nomes_esperados(item: ConsultaItem, job: ConsultaJob) -> list[str]:
-    """Remetente/destinatário que a própria planilha diz pra essa linha --
-    usado pra confirmar que o CT-e achado é mesmo desse cliente."""
-    if not job.coluna_remetente and not job.coluna_destinatario:
+    """Remetente/destinatário/tomador do serviço que a própria planilha diz
+    pra essa linha -- usado pra confirmar que o CT-e achado é mesmo desse
+    cliente."""
+    colunas = (job.coluna_remetente, job.coluna_destinatario, job.coluna_tomador)
+    if not any(colunas):
         return []
     linha = _linha_dict(item)
     nomes = []
-    for coluna in (job.coluna_remetente, job.coluna_destinatario):
+    for coluna in colunas:
         if coluna:
             valor = linha.get(coluna)
             if valor not in (None, ""):

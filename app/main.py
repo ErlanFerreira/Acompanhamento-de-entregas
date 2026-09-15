@@ -288,6 +288,14 @@ def _detectar_coluna_destinatario(cabecalho: list[str]) -> str | None:
     return _detectar_coluna(cabecalho, testar)
 
 
+def _detectar_coluna_tomador(cabecalho: list[str]) -> str | None:
+    """Tomador do serviço (quem contrata/paga o frete) -- ex: "Cliente
+    Pagador", "Tomador". Não é extraído da tela do GW (que só mostra
+    remetente/destinatário/consignatário), mas na prática costuma ser um
+    deles, então serve como mais um candidato pra validar o CT-e achado."""
+    return _detectar_coluna(cabecalho, lambda n: re.search(r"\btomador\b|\bpagador\b", n) is not None)
+
+
 @app.post("/api/consultas", dependencies=[Depends(require_auth_api)])
 async def api_consultas_create(
     arquivo: UploadFile,
@@ -315,6 +323,7 @@ async def api_consultas_create(
         coluna_nf=coluna_nf,
         coluna_remetente=_detectar_coluna_remetente(cabecalho),
         coluna_destinatario=_detectar_coluna_destinatario(cabecalho),
+        coluna_tomador=_detectar_coluna_tomador(cabecalho),
         status="pendente",
         arquivo_original=conteudo,
     )
