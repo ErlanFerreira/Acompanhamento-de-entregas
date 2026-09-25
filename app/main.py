@@ -277,6 +277,10 @@ def _detectar_coluna(cabecalho: list[str], testar) -> str | None:
     return None
 
 
+def _detectar_coluna_nf(cabecalho: list[str]) -> str | None:
+    return _detectar_coluna(cabecalho, lambda n: re.search(r"\bnotas?\b|\bnf\b", n) is not None)
+
+
 def _detectar_coluna_remetente(cabecalho: list[str]) -> str | None:
     return _detectar_coluna(cabecalho, lambda n: re.search(r"\bremetente\b", n) is not None)
 
@@ -308,7 +312,6 @@ def _detectar_coluna_cliente(cabecalho: list[str]) -> str | None:
 @app.post("/api/consultas", dependencies=[Depends(require_auth_api)])
 async def api_consultas_create(
     arquivo: UploadFile,
-    coluna_nf: str = Form(...),
     db: Session = Depends(get_db),
 ):
     conteudo = await arquivo.read()
@@ -317,50 +320,73 @@ async def api_consultas_create(
     except Exception:
         return JSONResponse({"erro": "Não consegui ler o arquivo. Confirme que é um .xlsx válido."}, status_code=400)
 
-    ws = wb.active
-    linhas = list(ws.iter_rows(values_only=True))
-    if not linhas:
-        return JSONResponse({"erro": "Planilha vazia."}, status_code=400)
-
-    cabecalho = [str(c).strip() if c is not None else "" for c in linhas[0]]
-    if coluna_nf not in cabecalho:
-        return JSONResponse({"erro": f'Coluna "{coluna_nf}" não encontrada na planilha.'}, status_code=400)
-    idx_nf = cabecalho.index(coluna_nf)
-
     job = ConsultaJob(
         nome_arquivo=arquivo.filename,
-        coluna_nf=coluna_nf,
-        coluna_remetente=_detectar_coluna_remetente(cabecalho),
-        coluna_destinatario=_detectar_coluna_destinatario(cabecalho),
-        coluna_tomador=_detectar_coluna_tomador(cabecalho),
-        coluna_cliente=_detectar_coluna_cliente(cabecalho),
         status="pendente",
         arquivo_original=conteudo,
     )
     db.add(job)
     db.flush()
 
+    # Cada aba/guia é conferida e processada separadamente -- se a
+    # planilha tiver mais de uma, todas com coluna de nota fiscal
+    # detectável entram na consulta (não só a primeira/ativa).
+    colunas_nf_detectadas: list[str] = []
     total = 0
-    for i, row in enumerate(linhas[1:], start=1):
-        if row is None or all(c is None for c in row):
+    for nome_aba in wb.sheetnames:
+        ws = wb[nome_aba]
+        linhas = list(ws.iter_rows(values_only=True))
+        if not linhas:
             continue
-        nf_valor = row[idx_nf] if idx_nf < len(row) else None
-        if nf_valor is None or str(nf_valor).strip() == "":
-            continue
-        linha_dict = {cabecalho[c]: row[c] for c in range(len(cabecalho)) if cabecalho[c] and c < len(row)}
-        item = ConsultaItem(
-            job_id=job.id,
-            linha_idx=i,
-            linha_original=json.dumps(linha_dict, ensure_ascii=False, default=str),
-            nf_numero=_primeira_nf(nf_valor),
-        )
-        db.add(item)
-        total += 1
 
+        cabecalho = [str(c).strip() if c is not None else "" for c in linhas[0]]
+        coluna_nf = _detectar_coluna_nf(cabecalho)
+        if not coluna_nf:
+            continue  # essa aba não tem coluna de nota fiscal -- pula
+        idx_nf = cabecalho.index(coluna_nf)
+        colunas_nf_detectadas.append(coluna_nf)
+
+        colunas_validacao = [
+            _detectar_coluna_remetente(cabecalho),
+            _detectar_coluna_destinatario(cabecalho),
+            _detectar_coluna_tomador(cabecalho),
+            _detectar_coluna_cliente(cabecalho),
+        ]
+
+        for i, row in enumerate(linhas[1:], start=1):
+            if row is None or all(c is None for c in row):
+                continue
+            nf_valor = row[idx_nf] if idx_nf < len(row) else None
+            if nf_valor is None or str(nf_valor).strip() == "":
+                continue
+            linha_dict = {cabecalho[c]: row[c] for c in range(len(cabecalho)) if cabecalho[c] and c < len(row)}
+            nomes = [
+                str(linha_dict[coluna]) for coluna in colunas_validacao
+                if coluna and linha_dict.get(coluna) not in (None, "")
+            ]
+            item = ConsultaItem(
+                job_id=job.id,
+                aba=nome_aba,
+                linha_idx=i,
+                linha_original=json.dumps(linha_dict, ensure_ascii=False, default=str),
+                nf_numero=_primeira_nf(nf_valor),
+                nomes_esperados=json.dumps(nomes, ensure_ascii=False) if nomes else None,
+            )
+            db.add(item)
+            total += 1
+
+    if not colunas_nf_detectadas:
+        db.rollback()
+        abas = ", ".join(wb.sheetnames)
+        return JSONResponse(
+            {"erro": f"Não encontrei uma coluna de nota fiscal em nenhuma aba da planilha (abas: {abas})."},
+            status_code=400,
+        )
     if total == 0:
         db.rollback()
-        return JSONResponse({"erro": f'Nenhuma linha com valor preenchido na coluna "{coluna_nf}".'}, status_code=400)
+        return JSONResponse({"erro": "Nenhuma linha com nota fiscal preenchida na planilha."}, status_code=400)
 
+    job.coluna_nf = ", ".join(sorted(set(colunas_nf_detectadas)))
     job.total_itens = total
     db.commit()
 
@@ -410,52 +436,60 @@ def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
         .all()
     )
 
-    # Agrupa por linha_idx (linha original da planilha) preservando a ordem
-    # de inserção -- cada grupo pode ter mais de um item (NF com mais de um CT-e).
-    grupos: dict[int, list[ConsultaItem]] = {}
-    for item in itens:
-        grupos.setdefault(item.linha_idx, []).append(item)
-
     wb = openpyxl.load_workbook(io.BytesIO(job.arquivo_original))
-    ws = wb.active
-    max_col_original = ws.max_column
 
-    cabecalho_estilo = ws.cell(row=1, column=max_col_original)
-    for offset, titulo in enumerate(_COLUNAS_NOVAS, start=1):
-        celula = ws.cell(row=1, column=max_col_original + offset, value=titulo)
-        celula.font = copy(cabecalho_estilo.font)
-        celula.border = copy(cabecalho_estilo.border)
-        celula.fill = copy(cabecalho_estilo.fill)
-        celula.alignment = copy(cabecalho_estilo.alignment)
-        ws.column_dimensions[celula.column_letter].width = 16
+    # Agrupa por aba e, dentro de cada aba, por linha_idx (linha original
+    # daquela aba) preservando a ordem de inserção -- cada grupo pode ter
+    # mais de um item (NF com mais de um CT-e). `aba` é `None` em consultas
+    # antigas (de antes de suportar múltiplas abas) -- trata como a
+    # primeira/única aba da planilha.
+    por_aba: dict[str, dict[int, list[ConsultaItem]]] = {}
+    for item in itens:
+        aba = item.aba or wb.sheetnames[0]
+        por_aba.setdefault(aba, {}).setdefault(item.linha_idx, []).append(item)
 
-    total_colunas = max_col_original + len(_COLUNAS_NOVAS)
+    for aba, grupos in por_aba.items():
+        if aba not in wb.sheetnames:
+            continue  # aba renomeada/removida desde o upload -- ignora com segurança
+        ws = wb[aba]
+        max_col_original = ws.max_column
 
-    def _escrever_resultado(linha_planilha: int, item: ConsultaItem):
-        valores = [item.cte, item.status_entrega, item.previsao_entrega, item.data_entrega, "Sim" if item.encontrado else "Não"]
-        for offset, valor in enumerate(valores, start=1):
-            celula = ws.cell(row=linha_planilha, column=max_col_original + offset, value=valor)
-            celula.fill = _FILL_DADOS_GW
+        cabecalho_estilo = ws.cell(row=1, column=max_col_original)
+        for offset, titulo in enumerate(_COLUNAS_NOVAS, start=1):
+            celula = ws.cell(row=1, column=max_col_original + offset, value=titulo)
+            celula.font = copy(cabecalho_estilo.font)
+            celula.border = copy(cabecalho_estilo.border)
+            celula.fill = copy(cabecalho_estilo.fill)
+            celula.alignment = copy(cabecalho_estilo.alignment)
+            ws.column_dimensions[celula.column_letter].width = 16
 
-    # Processa das últimas linhas para as primeiras: inserir linhas extras
-    # (NF com mais de um CT-e) desloca tudo abaixo, então precisa ir de
-    # baixo pra cima para não bagunçar a posição das linhas ainda não
-    # processadas.
-    for linha_idx in sorted(grupos.keys(), reverse=True):
-        grupo = grupos[linha_idx]
-        linha_planilha = linha_idx + 1  # linha 1 é o cabeçalho
-        primeiro, *extras = grupo
-        _escrever_resultado(linha_planilha, primeiro)
+        total_colunas = max_col_original + len(_COLUNAS_NOVAS)
 
-        valores_originais = [ws.cell(row=linha_planilha, column=c).value for c in range(1, max_col_original + 1)]
-        insercao = linha_planilha + 1
-        for extra in extras:
-            ws.insert_rows(insercao)
-            _clonar_estilo_linha(ws, linha_planilha, insercao, total_colunas)
-            for c, valor in enumerate(valores_originais, start=1):
-                ws.cell(row=insercao, column=c, value=valor)
-            _escrever_resultado(insercao, extra)
-            insercao += 1
+        def _escrever_resultado(linha_planilha: int, item: ConsultaItem, ws=ws, max_col_original=max_col_original):
+            valores = [item.cte, item.status_entrega, item.previsao_entrega, item.data_entrega, "Sim" if item.encontrado else "Não"]
+            for offset, valor in enumerate(valores, start=1):
+                celula = ws.cell(row=linha_planilha, column=max_col_original + offset, value=valor)
+                celula.fill = _FILL_DADOS_GW
+
+        # Processa das últimas linhas para as primeiras: inserir linhas
+        # extras (NF com mais de um CT-e) desloca tudo abaixo, então
+        # precisa ir de baixo pra cima para não bagunçar a posição das
+        # linhas ainda não processadas.
+        for linha_idx in sorted(grupos.keys(), reverse=True):
+            grupo = grupos[linha_idx]
+            linha_planilha = linha_idx + 1  # linha 1 é o cabeçalho
+            primeiro, *extras = grupo
+            _escrever_resultado(linha_planilha, primeiro)
+
+            valores_originais = [ws.cell(row=linha_planilha, column=c).value for c in range(1, max_col_original + 1)]
+            insercao = linha_planilha + 1
+            for extra in extras:
+                ws.insert_rows(insercao)
+                _clonar_estilo_linha(ws, linha_planilha, insercao, total_colunas)
+                for c, valor in enumerate(valores_originais, start=1):
+                    ws.cell(row=insercao, column=c, value=valor)
+                _escrever_resultado(insercao, extra)
+                insercao += 1
 
     buffer = io.BytesIO()
     wb.save(buffer)

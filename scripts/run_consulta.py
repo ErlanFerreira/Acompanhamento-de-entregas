@@ -17,28 +17,14 @@ from app.models import ConsultaItem, ConsultaJob  # noqa: E402
 from app.scrape import consultar_notas_fiscais, empresa_confere  # noqa: E402
 
 
-def _linha_dict(item: ConsultaItem) -> dict:
-    try:
-        return json.loads(item.linha_original or "{}")
-    except ValueError:
-        return {}
-
-
-def _nomes_esperados(item: ConsultaItem, job: ConsultaJob) -> list[str]:
+def _nomes_esperados(item: ConsultaItem) -> list[str]:
     """Remetente/destinatário/tomador/cliente que a própria planilha diz
-    pra essa linha -- usado pra confirmar que o CT-e achado é mesmo desse
-    cliente."""
-    colunas = (job.coluna_remetente, job.coluna_destinatario, job.coluna_tomador, job.coluna_cliente)
-    if not any(colunas):
+    pra essa linha (resolvido no upload -- ver api_consultas_create) --
+    usado pra confirmar que o CT-e achado é mesmo desse cliente."""
+    try:
+        return json.loads(item.nomes_esperados or "[]")
+    except ValueError:
         return []
-    linha = _linha_dict(item)
-    nomes = []
-    for coluna in colunas:
-        if coluna:
-            valor = linha.get(coluna)
-            if valor not in (None, ""):
-                nomes.append(str(valor))
-    return nomes
 
 
 def _filtrar_por_parceiro(matches: list[dict], nomes_esperados: list[str]) -> list[dict]:
@@ -86,7 +72,7 @@ def main(job_id: int):
                 continue
 
             matches = resultados.get(item.nf_numero, [])
-            matches = _filtrar_por_parceiro(matches, _nomes_esperados(item, job))
+            matches = _filtrar_por_parceiro(matches, _nomes_esperados(item))
             if not matches:
                 item.encontrado = False
                 continue
@@ -97,6 +83,7 @@ def main(job_id: int):
             for extra in extras:
                 novo = ConsultaItem(
                     job_id=job_id,
+                    aba=item.aba,
                     linha_idx=item.linha_idx,
                     linha_original=item.linha_original,
                     nf_numero=item.nf_numero,

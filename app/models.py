@@ -51,17 +51,11 @@ class ConsultaJob(Base):
     id = Column(Integer, primary_key=True)
     criado_em = Column(DateTime, default=datetime.datetime.utcnow)
     nome_arquivo = Column(String(255))
+    # Coluna(s) de NF detectadas -- se a planilha tiver mais de uma
+    # aba/guia, cada uma é conferida e processada separadamente (podem ter
+    # nomes de coluna diferentes), então aqui fica só um resumo pra exibir
+    # na tabela de consultas (ex: "Notas Fiscais, NF").
     coluna_nf = Column(String(255))
-    # Detectadas automaticamente no cabeçalho, se existirem -- usadas pra
-    # validar que o CT-e achado realmente pertence ao cliente da linha
-    # (remetente/destinatário/tomador do serviço/coluna genérica
-    # "Cliente"), já que o número da NF sozinho não é único. Ficam `None`
-    # quando a planilha não tem essas colunas -- nesse caso, mantém o
-    # comportamento antigo (sem validação).
-    coluna_remetente = Column(String(255), nullable=True)
-    coluna_destinatario = Column(String(255), nullable=True)
-    coluna_tomador = Column(String(255), nullable=True)
-    coluna_cliente = Column(String(255), nullable=True)
     status = Column(String(20), default="pendente")  # pendente|processando|concluido|erro
     total_itens = Column(Integer, default=0)
     processados = Column(Integer, default=0)
@@ -81,9 +75,18 @@ class ConsultaItem(Base):
 
     id = Column(Integer, primary_key=True)
     job_id = Column(Integer, index=True)
+    # Nome da aba/guia de origem -- a planilha pode ter mais de uma, cada
+    # qual processada com sua própria detecção de colunas. `None` nas
+    # consultas antigas (de antes de suportar múltiplas abas), que só
+    # tinham a aba ativa.
+    aba = Column(String(255), nullable=True)
     linha_idx = Column(Integer)  # posição original na planilha (mantém ordem)
     linha_original = Column(Text)  # JSON: {cabecalho: valor, ...} da linha inteira
     nf_numero = Column(String(50))
+    # JSON: lista de nomes (remetente/destinatário/tomador/cliente, o que a
+    # planilha tiver) já resolvidos no upload -- cada aba pode ter colunas
+    # diferentes, então isso é calculado por linha, não por job inteiro.
+    nomes_esperados = Column(Text, nullable=True)
     encontrado = Column(Boolean, default=False)
     cte = Column(String(50), nullable=True)
     status_entrega = Column(String(255), nullable=True)

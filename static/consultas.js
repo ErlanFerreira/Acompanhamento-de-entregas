@@ -6,28 +6,6 @@
   const uploadStatus = document.getElementById("upload-status");
 
   let arquivoSelecionado = null;
-  let colunaDetectada = null;
-
-  function normalizar(s) {
-    return String(s == null ? "" : s)
-      .normalize("NFD").replace(/[̀-ͯ]/g, "")
-      .toLowerCase()
-      // Trata "-", "_" e "/" como separador de palavra (ex: "Numero-NF",
-      // "Nota_Fiscal", "NF/Pedido"), não como parte do texto.
-      .replace(/[-_/]+/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  function detectarColunaNF(cabecalho) {
-    for (const c of cabecalho) {
-      const n = normalizar(c);
-      if (/\bnotas?\b/.test(n) || /\bnf\b/.test(n)) {
-        return c;
-      }
-    }
-    return null;
-  }
 
   const STATUS_LABEL = {
     pendente: "Na fila",
@@ -40,54 +18,24 @@
 
   fArquivo.addEventListener("change", function () {
     const file = fArquivo.files[0];
-    if (!file) return;
-    arquivoSelecionado = file;
-    colunaDetectada = null;
-    btnEnviar.disabled = true;
-    uploadStatus.textContent = "Lendo cabeçalho da planilha…";
-
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      try {
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: "array" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 });
-        const cabecalho = (rows[0] || []).map(c => String(c ?? "").trim()).filter(c => c);
-        if (!cabecalho.length) {
-          uploadStatus.textContent = "Não consegui ler o cabeçalho dessa planilha.";
-          return;
-        }
-        const coluna = detectarColunaNF(cabecalho);
-        if (!coluna) {
-          uploadStatus.textContent = "Não encontrei uma coluna de nota fiscal nessa planilha.";
-          return;
-        }
-        colunaDetectada = coluna;
-        btnEnviar.disabled = false;
-        uploadStatus.textContent = `Coluna de nota fiscal detectada: "${coluna}".`;
-      } catch (err) {
-        uploadStatus.textContent = "Erro ao ler o arquivo: " + err.message;
-      }
-    };
-    reader.readAsArrayBuffer(file);
+    arquivoSelecionado = file || null;
+    btnEnviar.disabled = !file;
+    uploadStatus.textContent = "";
   });
 
   btnEnviar.addEventListener("click", async function () {
-    if (!arquivoSelecionado || !colunaDetectada) return;
+    if (!arquivoSelecionado) return;
     btnEnviar.disabled = true;
     uploadStatus.textContent = "Enviando…";
     try {
       const fd = new FormData();
       fd.append("arquivo", arquivoSelecionado);
-      fd.append("coluna_nf", colunaDetectada);
       const resp = await fetch("/api/consultas", { method: "POST", credentials: "same-origin", body: fd });
       const body = await resp.json();
       if (!resp.ok) throw new Error(body.erro || "Falha ao enviar.");
       uploadStatus.textContent = `Consulta enviada (${body.total_itens} NFs). Acompanhe abaixo -- isso pode levar de alguns minutos até cerca de 1 hora para planilhas grandes.`;
       fArquivo.value = "";
       arquivoSelecionado = null;
-      colunaDetectada = null;
       loadJobs();
       garantirPolling();
     } catch (e) {

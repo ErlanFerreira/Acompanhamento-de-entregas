@@ -5,7 +5,7 @@
   <header class="app-header">
     <div>
       <h1>Consulta de Notas Fiscais</h1>
-      <p>Envie uma planilha com os números de NF dos parceiros e receba de volta com status de entrega, previsão e data de entrega.</p>
+      <p>Envie uma planilha com os números de NF dos parceiros e receba de volta com status de entrega, previsão e data de entrega. Se a planilha tiver mais de uma aba, todas com coluna de nota fiscal são processadas.</p>
     </div>
     <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
   </header>
@@ -48,6 +48,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="/static/consultas.js"></script>
 {% endblock %}
