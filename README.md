@@ -16,6 +16,30 @@ uma senha única compartilhada (sem contas de usuário).
   usuário consultar qualquer período dentro do que já foi sincronizado.
 - Botão "Atualizar agora" dispara uma sincronização fora do horário
   agendado (assíncrona — leva 1-2 minutos, não é instantânea).
+- **Bipagem de CT-e** (`/bipagem`): bipa o código de barras (ou QR Code) do
+  DACTE com um leitor USB. O número/série do CT-e saem da própria chave de
+  acesso (44 dígitos, validada pelo dígito verificador); a NF e o CT-e do
+  parceiro vêm do banco sincronizado. Cada bip fica gravado no banco
+  (tabela `bipagens`), separado por finalidade:
+  - **Envio de comprovantes** → "Controle de comprovantes do mês" (modelo
+    `app/modelos/controle_comprovantes.xlsx`): todos os CT-e do mês de um
+    tomador (raiz do CNPJ); os bipados saem com a data do bip em "Data de
+    Envio ao Financeiro/Arquivo" e status "Recebido".
+  - **Envio de faturas** → "Protocolo de faturas" (modelo
+    `app/modelos/protocolo_envio.xlsx`): DACTE Nº (CT-e do parceiro; sem
+    redespacho, o nosso) + NF dos bipados, uma aba por filial + tomador —
+    o recebedor é o tomador do CT-e. 136 CT-e por aba (2 páginas).
+  - Dados do emitente (razão social/endereço por CNPJ de filial) ficam em
+    `app/filiais.py`.
+
+  De onde vem cada dado:
+  - CT-e do parceiro = coluna "N. CT-e Redespacho" do relatório.
+  - NF, série, filial e endereço do tomador = colunas do relatório cujo
+    título tenha "Notas"/"NF", "Série", "Filial" e "Endereço
+    Consignatário" — **precisam ser acrescentadas ao relatório
+    personalizado "Pendências" no GW** (a sincronização detecta pelo nome,
+    não precisa mexer no código).
+  - Só acha CT-e dentro da janela sincronizada (`SYNC_WINDOW_DAYS`, 90 dias).
 
 ### Por que via navegador automatizado, e não a API oficial
 

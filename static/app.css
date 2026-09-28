@@ -162,7 +162,7 @@ section.filters {
 .chip[data-state="serious"].active { background: var(--status-serious); }
 .chip[data-state="critical"].active { background: var(--status-critical); }
 .chip .dot-swatch { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-select, input[type="text"], input[type="date"], input[type="email"], input[type="password"] {
+select, input[type="text"], input[type="date"], input[type="month"], input[type="email"], input[type="password"] {
   font: inherit; font-size: 12.5px; color: var(--text-primary); background: var(--surface-1);
   border: 1px solid var(--border); border-radius: 7px; padding: 5px 8px;
 }
@@ -280,3 +280,21 @@ footer.app-footer strong { color: var(--text-secondary); }
   section.kpis { grid-template-columns: repeat(2, 1fr); }
   .grid-2 { grid-template-columns: 1fr; }
 }
+
+/* ---- bipagem de CT-e ---- */
+.bip-label { display: block; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 6px; }
+input[type="text"].bip-input { width: 100%; box-sizing: border-box; font-size: 20px; padding: 12px 14px; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+.bip-feedback { display: none; margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 14px; }
+.bip-feedback.show { display: block; }
+.bip-feedback.ok { background: color-mix(in srgb, var(--status-good) 14%, transparent); color: var(--text-primary); border-left: 4px solid var(--status-good); }
+.bip-feedback.aviso { background: color-mix(in srgb, var(--status-warning) 18%, transparent); color: var(--text-primary); border-left: 4px solid var(--status-warning); }
+.bip-feedback.erro { background: color-mix(in srgb, var(--status-critical) 14%, transparent); color: var(--status-critical); border-left: 4px solid var(--status-critical); }
+.bip-feedback.info { background: var(--gridline); color: var(--text-secondary); }
+.bip-muted { color: var(--text-muted); }
+tr.bip-row-warn td { background: color-mix(in srgb, var(--status-warning) 8%, transparent); }
+.bip-remover { padding: 2px 8px; }
+.chip.bip-finalidade.active { background: var(--accent); }
+.bip-form { align-items: flex-end; gap: 12px; }
+.bip-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-secondary); }
+.bip-form select { min-width: 280px; }
+[hidden] { display: none !important; }

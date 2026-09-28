@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Bipagem de CT-e — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+  <header class="app-header">
+    <div>
+      <h1>Bipagem de CT-e</h1>
+      <p>Bipe o código de barras (ou o QR Code) do DACTE. O número do CT-e sai da própria chave; a NF, o CT-e do parceiro e o tomador vêm da última sincronização com o GW.</p>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+  </header>
+
+  <section class="table-section" style="margin-bottom: 20px;">
+    <div class="filter-group" style="margin-bottom: 12px;" role="radiogroup" aria-label="Finalidade">
+      <span class="filter-label">Finalidade</span>
+      <button type="button" class="chip bip-finalidade" data-finalidade="comprovante">Envio de comprovantes</button>
+      <button type="button" class="chip bip-finalidade" data-finalidade="fatura">Envio de faturas</button>
+    </div>
+    <label class="bip-label" for="f-leitura">Código de barras do CT-e</label>
+    <input type="text" id="f-leitura" class="bip-input" autocomplete="off" autofocus
+           inputmode="numeric" placeholder="Clique aqui e bipe o DACTE…">
+    <div class="bip-feedback" id="bip-feedback" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="table-section bip-relatorio" data-para="comprovante" style="margin-bottom: 20px;">
+    <div class="table-toolbar">
+      <h2>Controle de comprovantes do mês</h2>
+      <span class="count">Todos os CT-e do mês do tomador; os bipados aqui saem como "Recebido" com a data do bip.</span>
+    </div>
+    <div class="filter-group bip-form">
+      <label>Tomador
+        <select id="f-tomador"><option value="">Carregando…</option></select>
+      </label>
+      <label>Mês
+        <input type="month" id="f-mes">
+      </label>
+      <label>Responsável
+        <input type="text" id="f-responsavel" placeholder="Seu nome">
+      </label>
+      <button class="btn-primary" id="btn-controle" type="button">Gerar controle</button>
+    </div>
+  </section>
+
+  <section class="table-section">
+    <div class="table-toolbar">
+      <h2>CT-e bipados</h2>
+      <span class="count" id="bip-count"></span>
+      <span class="filters-spacer"></span>
+      <button class="btn-primary bip-relatorio" data-para="fatura" id="btn-protocolo" type="button" disabled>Gerar protocolo de faturas</button>
+      <button class="btn" id="btn-exportar" type="button" disabled>Exportar lista</button>
+      <button class="btn" id="btn-limpar" type="button" disabled>Limpar tela</button>
+    </div>
+    <div class="table-scroll">
+      <table class="detail">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>CT-e</th>
+            <th>Série</th>
+            <th>NF</th>
+            <th>CT-e parceiro</th>
+            <th>Tomador</th>
+            <th>Destinatário</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="bip-body"></tbody>
+      </table>
+    </div>
+    <div class="empty-state" id="bip-vazio">Nenhum CT-e bipado ainda.</div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/bipagem.js"></script>
+{% endblock %}

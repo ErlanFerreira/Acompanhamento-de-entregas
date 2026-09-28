@@ -14,12 +14,13 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.db import Base, SessionLocal, engine  # noqa: E402
+from app.db import SessionLocal  # noqa: E402
+from app.seed import init_db_and_seed  # noqa: E402
 from app.sync import run_sync  # noqa: E402
 
 
 def main():
-    Base.metadata.create_all(bind=engine)
+    init_db_and_seed()
     db = SessionLocal()
     try:
         count = run_sync(db)

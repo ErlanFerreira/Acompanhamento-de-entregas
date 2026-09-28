@@ -7,6 +7,8 @@ remetente/destinatário -- não a operação completa da transportadora).
 
 import datetime
 import logging
+import re
+import unicodedata
 from io import BytesIO
 
 import openpyxl
@@ -25,6 +27,7 @@ COL_EMISSAO = 0
 COL_CTE = 1
 COL_REMETENTE = 2
 COL_CONSIGNATARIO = 4
+COL_CNPJ_CONSIGNATARIO = 5
 COL_CIDADE_CONSIGNATARIO = 6
 COL_DESTINATARIO = 7
 COL_CIDADE_DESTINATARIO = 9
@@ -38,6 +41,35 @@ COL_DATA_BAIXA = 17
 COL_STATUS_ENTREGA = 18
 COL_PREVISAO_ENTREGA = 19
 COL_CNPJ_FILIAL = 21
+
+# Colunas localizadas pelo nome do cabeçalho (não pela posição), já que não
+# existiam na versão original do relatório -- assim dá pra acrescentar
+# colunas no relatório personalizado do GW sem quebrar os índices acima.
+# Cada teste recebe o cabeçalho normalizado (minúsculo, sem acento).
+COLUNAS_OPCIONAIS = {
+    "cte_redespacho": lambda n: "redespacho" in n,
+    "notas_fiscais": lambda n: re.search(r"\bnotas?\b|\bnf e?\b|\bnfs\b", n) is not None,
+    "serie": lambda n: "serie" in n,
+    "filial": lambda n: "filial" in n and "cnpj" not in n,
+    "endereco_consignatario": lambda n: "endereco" in n and ("consig" in n or "tomador" in n),
+}
+
+
+def _normalizar_cabecalho(s) -> str:
+    texto = unicodedata.normalize("NFD", str(s or ""))
+    texto = "".join(c for c in texto if unicodedata.category(c) != "Mn")
+    texto = re.sub(r"[-_/.]+", " ", texto.lower())
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def detectar_colunas_opcionais(cabecalho) -> dict[str, int]:
+    indices = {}
+    for campo, testar in COLUNAS_OPCIONAIS.items():
+        for i, c in enumerate(cabecalho):
+            if i not in indices.values() and testar(_normalizar_cabecalho(c)):
+                indices[campo] = i
+                break
+    return indices
 
 
 def _so_digitos(s):
@@ -56,7 +88,12 @@ def _sim(v):
     return str(v or "").strip().upper() == "SIM"
 
 
-def mapear_linha_para_registro(row, referencia: str) -> dict:
+def _texto_ou_none(v):
+    texto = str(v).strip() if v is not None else ""
+    return texto or None
+
+
+def mapear_linha_para_registro(row, referencia: str, opcionais: dict[str, int] | None = None) -> dict:
     cnpj_filial = _so_digitos(row[COL_CNPJ_FILIAL])
     cte = str(row[COL_CTE] or "").strip()
     id_cte = f"{cnpj_filial}:{cte}" if cnpj_filial else cte
@@ -83,13 +120,20 @@ def mapear_linha_para_registro(row, referencia: str) -> dict:
             d2 = datetime.date.fromisoformat(previsao)
             dias_atraso = (d1 - d2).days
 
+    extras = {
+        campo: _texto_ou_none(row[idx]) if idx < len(row) else None
+        for campo, idx in (opcionais or {}).items()
+    }
+
     return {
+        **extras,
         "id_cte": id_cte,
         "cte": cte,
         "cnpj_filial": cnpj_filial,
         "emissao": _data_iso(row[COL_EMISSAO]),
         "remetente": row[COL_REMETENTE] or "",
         "consignatario": row[COL_CONSIGNATARIO] or "",
+        "cnpj_consignatario": _so_digitos(row[COL_CNPJ_CONSIGNATARIO]) or None,
         "cidade_cons": row[COL_CIDADE_CONSIGNATARIO] or None,
         "destinatario": row[COL_DESTINATARIO] or "",
         "cidade_dest": row[COL_CIDADE_DESTINATARIO] or "",
@@ -128,6 +172,9 @@ def run_sync(db: Session, window_days: int = None) -> int:
         conteudo = baixar_relatorio_pendencias(data_inicial, hoje)
         wb = openpyxl.load_workbook(BytesIO(conteudo), data_only=True)
         ws = wb.active
+        cabecalho = next(ws.iter_rows(min_row=2, max_row=2, values_only=True), ())
+        opcionais = detectar_colunas_opcionais(cabecalho)
+        logger.info("Colunas opcionais detectadas no relatório: %s", opcionais)
         linhas = list(ws.iter_rows(min_row=3, values_only=True))
 
         registros_by_id = {}
@@ -138,7 +185,7 @@ def run_sync(db: Session, window_days: int = None) -> int:
             # canceladas de PE/FPE) -- não são pendências reais.
             if (row[COL_STATUS_ENTREGA] or "").strip() not in ("DP", "FPE", "PE"):
                 continue
-            reg = mapear_linha_para_registro(row, referencia)
+            reg = mapear_linha_para_registro(row, referencia, opcionais)
             registros_by_id[reg["id_cte"]] = reg
 
         count = 0

@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, LargeBinary, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, LargeBinary, String, Text, UniqueConstraint
 
 from .db import Base
 
@@ -32,7 +32,38 @@ class Carga(Base):
     estado = Column(String(20))
     previsao = Column(String(10))
     dias_atraso = Column(Integer, nullable=True)
+    # Conhecimento do parceiro (coluna "N. CT-e Redespacho" do relatório) --
+    # vazio quando o CT-e não envolve redespacho/subcontratação.
+    cte_redespacho = Column(String(50), nullable=True)
+    # Número(s) de NF do CT-e -- só preenchido se o relatório "Pendências"
+    # tiver uma coluna de notas fiscais (ver COLUNAS_OPCIONAIS em sync.py).
+    notas_fiscais = Column(Text, nullable=True)
+    # Tomador do serviço -- é o recebedor do protocolo de envio de faturas e
+    # o filtro do controle mensal de comprovantes (ver relatorios_bipagem.py).
+    cnpj_consignatario = Column(String(20), nullable=True, index=True)
+    endereco_consignatario = Column(String(255), nullable=True)
+    # Série/nome da filial -- só se o relatório tiver essas colunas.
+    serie = Column(String(10), nullable=True)
+    filial = Column(String(60), nullable=True)
     atualizado_em = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class Bipagem(Base):
+    """Um CT-e bipado na tela de Bipagem. Fica no banco (não só no
+    navegador) porque o controle mensal de comprovantes usa a data do bip
+    como "Data de Envio ao Financeiro/Arquivo", acumulando bips de vários
+    dias/computadores."""
+
+    __tablename__ = "bipagens"
+    __table_args__ = (UniqueConstraint("chave", "finalidade", name="uq_bipagem_chave_finalidade"),)
+
+    id = Column(Integer, primary_key=True)
+    chave = Column(String(44), nullable=False, index=True)
+    finalidade = Column(String(20), nullable=False)  # comprovante|fatura
+    cnpj_filial = Column(String(20), index=True)
+    numero = Column(Integer, index=True)
+    serie = Column(String(10))
+    bipado_em = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 class Meta(Base):

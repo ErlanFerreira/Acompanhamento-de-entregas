@@ -18,9 +18,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from . import config
+from . import chave_cte, config, relatorios_bipagem
 from .db import get_db
-from .models import Carga, ConsultaItem, ConsultaJob, Meta
+from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
@@ -205,6 +205,164 @@ def api_sync_run():
     if not resultado["ok"]:
         return JSONResponse(resultado, status_code=502 if "GitHub respondeu" in resultado.get("erro", "") else 500)
     return {"ok": True, "queued": True}
+
+
+# ------------------------------------------------------------ bipagem -----
+
+@app.get("/bipagem", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+def bipagem_page(request: Request):
+    return templates.TemplateResponse("bipagem.html", {"request": request, "active": "bipagem"})
+
+
+def _resultado_bipagem(db: Session, leitura: str) -> dict:
+    try:
+        dados = chave_cte.decodificar(leitura)
+    except chave_cte.ChaveInvalida as exc:
+        return {"ok": False, "leitura": leitura, "erro": str(exc)}
+
+    carga = relatorios_bipagem.buscar_carga(db, dados["cnpj_emitente"], dados["numero"])
+    resultado = {"ok": True, **dados, "encontrado": carga is not None}
+    if carga:
+        resultado.update({
+            "cte": carga.cte,
+            "notas_fiscais": carga.notas_fiscais,
+            "cte_redespacho": carga.cte_redespacho,
+            "emissao": carga.emissao,
+            "remetente": carga.remetente,
+            "consignatario": carga.consignatario,
+            "cnpj_consignatario": carga.cnpj_consignatario,
+            "destinatario": carga.destinatario,
+            "cidade_dest": carga.cidade_dest,
+            "uf_dest": carga.uf_dest,
+            "status": carga.status,
+            "estado": carga.estado,
+        })
+    return resultado
+
+
+def _validar_finalidade(finalidade: str):
+    if finalidade not in relatorios_bipagem.FINALIDADES:
+        raise HTTPException(status_code=400, detail="Finalidade inválida.")
+
+
+@app.post("/api/bipagem", dependencies=[Depends(require_auth_api)])
+def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
+    """Registra um bip. Repetir a mesma chave na mesma finalidade não cria
+    outro registro -- volta `duplicado` com a data do primeiro bip."""
+    finalidade = payload.get("finalidade") or ""
+    _validar_finalidade(finalidade)
+    resultado = _resultado_bipagem(db, str(payload.get("leitura") or ""))
+    if not resultado["ok"]:
+        return resultado
+
+    bip = (
+        db.query(Bipagem)
+        .filter(Bipagem.chave == resultado["chave"], Bipagem.finalidade == finalidade)
+        .first()
+    )
+    resultado["duplicado"] = bip is not None
+    if not bip:
+        bip = Bipagem(
+            chave=resultado["chave"],
+            finalidade=finalidade,
+            cnpj_filial=resultado["cnpj_emitente"],
+            numero=resultado["numero"],
+            serie=resultado["serie"],
+        )
+        db.add(bip)
+        db.commit()
+    resultado["bipado_em"] = bip.bipado_em.isoformat() + "Z"
+    return resultado
+
+
+@app.delete("/api/bipagem", dependencies=[Depends(require_auth_api)])
+def api_bipagem_remover(chave: str, finalidade: str, db: Session = Depends(get_db)):
+    """Desfaz um bip (ex: bipado por engano) -- no controle de comprovantes
+    o CT-e volta a ficar sem data de envio."""
+    _validar_finalidade(finalidade)
+    db.query(Bipagem).filter(Bipagem.chave == chave, Bipagem.finalidade == finalidade).delete()
+    db.commit()
+    return {"ok": True}
+
+
+def _xlsx_response(conteudo: bytes, nome: str) -> StreamingResponse:
+    return StreamingResponse(
+        io.BytesIO(conteudo),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
+
+
+@app.get("/api/bipagem/tomadores", dependencies=[Depends(require_auth_api)])
+def api_bipagem_tomadores(db: Session = Depends(get_db)):
+    return {"tomadores": relatorios_bipagem.tomadores_disponiveis(db)}
+
+
+@app.get("/api/bipagem/controle", dependencies=[Depends(require_auth_api)])
+def api_bipagem_controle(tomador: str, mes: str, responsavel: str = "", db: Session = Depends(get_db)):
+    """Controle mensal de comprovantes (modelo "SETEMBRO - GUANABARA") --
+    `tomador` é a raiz (8 dígitos) do CNPJ, `mes` no formato AAAA-MM."""
+    m = re.fullmatch(r"(\d{4})-(\d{2})", mes or "")
+    raiz = "".join(c for c in tomador if c.isdigit())[:8]
+    if not m or not 1 <= int(m.group(2)) <= 12 or len(raiz) != 8:
+        return JSONResponse({"erro": "Informe o tomador e o mês (AAAA-MM)."}, status_code=400)
+    ano, mes_num = int(m.group(1)), int(m.group(2))
+    conteudo = relatorios_bipagem.gerar_controle_comprovantes(db, raiz, ano, mes_num, responsavel.strip())
+    return _xlsx_response(conteudo, f"controle_comprovantes_{raiz}_{mes}.xlsx")
+
+
+@app.post("/api/bipagem/protocolo", dependencies=[Depends(require_auth_api)])
+def api_bipagem_protocolo(payload: dict, db: Session = Depends(get_db)):
+    """Protocolo de envio de faturas (modelo "ENVIO DE COMPROVANTE -
+    PETROCARGAS") dos CT-e bipados -- uma aba por filial + tomador."""
+    chaves = [str(x) for x in (payload.get("leituras") or [])][:2000]
+    conteudo = relatorios_bipagem.gerar_protocolo_faturas(db, chaves)
+    return _xlsx_response(conteudo, f"protocolo_faturas_{datetime.date.today().isoformat()}.xlsx")
+
+
+_COLUNAS_BIPAGEM = [
+    ("Chave de acesso", "chave"),
+    ("CT-e", "numero"),
+    ("Série", "serie"),
+    ("CNPJ emitente", "cnpj_emitente_fmt"),
+    ("NF", "notas_fiscais"),
+    ("CT-e parceiro", "cte_redespacho"),
+    ("Emissão", "emissao"),
+    ("Remetente", "remetente"),
+    ("Destinatário", "destinatario"),
+    ("Cidade destino", "cidade_dest"),
+    ("UF", "uf_dest"),
+    ("Status", "status"),
+    ("Na base?", "encontrado"),
+]
+
+
+@app.post("/api/bipagem/exportar", dependencies=[Depends(require_auth_api)])
+def api_bipagem_exportar(payload: dict, db: Session = Depends(get_db)):
+    leituras = [str(x) for x in (payload.get("leituras") or [])][:2000]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Bipagem"
+    ws.append([titulo for titulo, _ in _COLUNAS_BIPAGEM])
+    for leitura in leituras:
+        r = _resultado_bipagem(db, leitura)
+        if not r["ok"]:
+            ws.append([leitura, None, None, None, None, None, None, None, None, None, None, r["erro"], "Não"])
+            continue
+        linha = []
+        for _, campo in _COLUNAS_BIPAGEM:
+            v = r.get(campo)
+            linha.append(("Sim" if v else "Não") if campo == "encontrado" else v)
+        ws.append(linha)
+    for col, largura in zip("ABCDEFGHIJKLM", (48, 10, 7, 20, 18, 16, 12, 34, 34, 20, 5, 8, 9)):
+        ws.column_dimensions[col].width = largura
+    # Chave como texto -- senão o Excel mostra em notação científica.
+    for (celula,) in ws.iter_rows(min_row=2, min_col=1, max_col=1):
+        celula.number_format = "@"
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return _xlsx_response(buffer.getvalue(), f"bipagem_{datetime.date.today().isoformat()}.xlsx")
 
 
 # --------------------------------------------------- consulta de notas ----
