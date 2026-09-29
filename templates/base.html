@@ -14,7 +14,9 @@
     <nav>
       <a href="/painel" class="nav-link {{ 'active' if active == 'painel' else '' }}">Painel</a>
       <a href="/consultas" class="nav-link {{ 'active' if active == 'consultas' else '' }}">Consulta de Notas</a>
+      {% if tem_acesso_completo(request) %}
       <a href="/bipagem" class="nav-link {{ 'active' if active == 'bipagem' else '' }}">Bipagem de CT-e</a>
+      {% endif %}
     </nav>
     <div class="sidebar-footer">
       <button type="button" id="btn-link-acesso" class="nav-link">🔗 Link de acesso</button>

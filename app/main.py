@@ -25,10 +25,15 @@ from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
     create_session_cookie,
+    VIA_LINK,
+    VIA_SENHA,
     create_share_token,
     is_authenticated,
+    require_acesso_completo_api,
+    require_acesso_completo_page,
     require_auth_api,
     require_auth_page,
+    tem_acesso_completo,
     verify_share_token,
 )
 from .seed import init_db_and_seed
@@ -48,6 +53,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+# Usado no menu (base.html) pra esconder as telas restritas de quem entrou
+# pelo link de acesso.
+templates.env.globals["tem_acesso_completo"] = tem_acesso_completo
 
 
 @app.exception_handler(HTTPException)
@@ -80,7 +88,7 @@ def login_submit(request: Request, senha: str = Form(...)):
             {"request": request, "error": "Senha incorreta."},
             status_code=401,
         )
-    token = create_session_cookie()
+    token = create_session_cookie(VIA_SENHA)
     resp = RedirectResponse(url="/painel", status_code=303)
     resp.set_cookie(COOKIE_NAME, token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="lax")
     return resp
@@ -99,7 +107,7 @@ def acesso_via_link(token: str):
     botão "Copiar link de acesso" no painel."""
     if not verify_share_token(token):
         return RedirectResponse(url="/login")
-    session_token = create_session_cookie()
+    session_token = create_session_cookie(VIA_LINK)
     resp = RedirectResponse(url="/painel", status_code=303)
     resp.set_cookie(COOKIE_NAME, session_token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="lax")
     return resp
@@ -209,7 +217,7 @@ def api_sync_run():
 
 # ------------------------------------------------------------ bipagem -----
 
-@app.get("/bipagem", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+@app.get("/bipagem", response_class=HTMLResponse, dependencies=[Depends(require_acesso_completo_page)])
 def bipagem_page(request: Request):
     return templates.TemplateResponse("bipagem.html", {"request": request, "active": "bipagem"})
 
@@ -245,7 +253,7 @@ def _validar_finalidade(finalidade: str):
         raise HTTPException(status_code=400, detail="Finalidade inválida.")
 
 
-@app.post("/api/bipagem", dependencies=[Depends(require_auth_api)])
+@app.post("/api/bipagem", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
     """Registra um bip. Repetir a mesma chave na mesma finalidade não cria
     outro registro -- volta `duplicado` com a data do primeiro bip."""
@@ -275,7 +283,7 @@ def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
     return resultado
 
 
-@app.delete("/api/bipagem", dependencies=[Depends(require_auth_api)])
+@app.delete("/api/bipagem", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_remover(chave: str, finalidade: str, db: Session = Depends(get_db)):
     """Desfaz um bip (ex: bipado por engano) -- no controle de comprovantes
     o CT-e volta a ficar sem data de envio."""
@@ -293,12 +301,12 @@ def _xlsx_response(conteudo: bytes, nome: str) -> StreamingResponse:
     )
 
 
-@app.get("/api/bipagem/tomadores", dependencies=[Depends(require_auth_api)])
+@app.get("/api/bipagem/tomadores", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_tomadores(db: Session = Depends(get_db)):
     return {"tomadores": relatorios_bipagem.tomadores_disponiveis(db)}
 
 
-@app.get("/api/bipagem/controle", dependencies=[Depends(require_auth_api)])
+@app.get("/api/bipagem/controle", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_controle(tomador: str, mes: str, responsavel: str = "", db: Session = Depends(get_db)):
     """Controle mensal de comprovantes (modelo "SETEMBRO - GUANABARA") --
     `tomador` é a raiz (8 dígitos) do CNPJ, `mes` no formato AAAA-MM."""
@@ -311,7 +319,7 @@ def api_bipagem_controle(tomador: str, mes: str, responsavel: str = "", db: Sess
     return _xlsx_response(conteudo, f"controle_comprovantes_{raiz}_{mes}.xlsx")
 
 
-@app.post("/api/bipagem/protocolo", dependencies=[Depends(require_auth_api)])
+@app.post("/api/bipagem/protocolo", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_protocolo(payload: dict, db: Session = Depends(get_db)):
     """Protocolo de envio de faturas (modelo "ENVIO DE COMPROVANTE -
     PETROCARGAS") dos CT-e bipados -- uma aba por filial + tomador."""
@@ -337,7 +345,7 @@ _COLUNAS_BIPAGEM = [
 ]
 
 
-@app.post("/api/bipagem/exportar", dependencies=[Depends(require_auth_api)])
+@app.post("/api/bipagem/exportar", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_exportar(payload: dict, db: Session = Depends(get_db)):
     leituras = [str(x) for x in (payload.get("leituras") or [])][:2000]
     wb = openpyxl.Workbook()
