@@ -2,6 +2,8 @@
 de barras do DACTE carrega. O QR Code do DACTE traz uma URL da SEFAZ com a
 mesma chave no parâmetro `chCTe`, então aceita as duas leituras.
 
+Também aceita o código de barras da minuta do GW (modelo 99, mesmo layout).
+
 Layout da chave (Manual do CT-e):
   cUF(2) AAMM(4) CNPJ emitente(14) modelo(2) série(3) nCT(9) tpEmis(1) cCT(8) DV(1)
 
@@ -13,6 +15,11 @@ import re
 
 MODELO_CTE = "57"
 MODELO_CTE_OS = "67"
+# Minuta do GW (série "M") -- não é documento fiscal, mas o GW imprime um
+# código de barras no mesmo layout da chave do CT-e, com modelo 99.
+MODELO_MINUTA = "99"
+
+TIPOS = {MODELO_CTE: "CT-e", MODELO_CTE_OS: "CT-e OS", MODELO_MINUTA: "Minuta"}
 
 UFS = {
     "11": "RO", "12": "AC", "13": "AM", "14": "RR", "15": "PA", "16": "AP", "17": "TO",
@@ -56,8 +63,10 @@ def decodificar(leitura: str) -> dict:
         raise ChaveInvalida("Dígito verificador não confere -- leitura provavelmente incompleta, bipe de novo.")
 
     modelo = chave[20:22]
-    if modelo not in (MODELO_CTE, MODELO_CTE_OS):
-        raise ChaveInvalida(f"Modelo {modelo} não é CT-e (esperado 57) -- pode ser a chave de uma NF-e (55).")
+    if modelo not in TIPOS:
+        raise ChaveInvalida(
+            f"Modelo {modelo} não é CT-e (57) nem minuta (99) -- pode ser a chave de uma NF-e (55)."
+        )
 
     cnpj = chave[6:20]
     return {
@@ -67,6 +76,7 @@ def decodificar(leitura: str) -> dict:
         "cnpj_emitente": cnpj,
         "cnpj_emitente_fmt": f"{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}",
         "modelo": modelo,
+        "tipo": TIPOS[modelo],
         "serie": str(int(chave[22:25])),
         "numero": int(chave[25:34]),
     }

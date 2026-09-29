@@ -298,3 +298,4 @@ tr.bip-row-warn td { background: color-mix(in srgb, var(--status-warning) 8%, tr
 .bip-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-secondary); }
 .bip-form select { min-width: 280px; }
 [hidden] { display: none !important; }
+.bip-tag { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); vertical-align: 1px; }

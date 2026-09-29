@@ -67,7 +67,8 @@
       return (
         '<tr class="' + (r.encontrado ? "" : "bip-row-warn") + '">' +
           '<td class="num">' + n + '</td>' +
-          '<td class="num"><strong>' + esc(r.numero) + '</strong></td>' +
+          '<td class="num"><strong>' + esc(r.numero) + '</strong>' +
+            (r.tipo && r.tipo !== "CT-e" ? ' <span class="bip-tag">' + esc(r.tipo) + '</span>' : "") + '</td>' +
           '<td class="num">' + esc(r.serie) + '</td>' +
           '<td class="num">' + vazioSe(r.notas_fiscais) + '</td>' +
           '<td class="num">' + vazioSe(r.cte_redespacho) + '</td>' +
@@ -118,11 +119,11 @@
     }
     if (r.duplicado) {
       const quando = new Date(r.bipado_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-      mostrarFeedback("aviso", "CT-e <strong>" + esc(r.numero) + "</strong> já tinha sido bipado em " + FINALIDADE_LABEL[finalidade] + " (" + esc(quando) + ").");
+      mostrarFeedback("aviso", esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> já tinha sido bipado em " + FINALIDADE_LABEL[finalidade] + " (" + esc(quando) + ").");
       return;
     }
 
-    const partes = ["CT-e <strong>" + esc(r.numero) + "</strong> (série " + esc(r.serie) + ")"];
+    const partes = [esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> (série " + esc(r.serie) + ")"];
     if (r.encontrado) {
       partes.push("NF: <strong>" + (r.notas_fiscais ? esc(r.notas_fiscais) : "—") + "</strong>");
       if (r.cte_redespacho) partes.push("CT-e parceiro: <strong>" + esc(r.cte_redespacho) + "</strong>");

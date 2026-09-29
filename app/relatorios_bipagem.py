@@ -36,15 +36,31 @@ def data_br(dt_utc: datetime.datetime) -> datetime.date:
     return dt_utc.replace(tzinfo=datetime.timezone.utc).astimezone(FUSO_BR).date()
 
 
-def buscar_carga(db: Session, cnpj_filial: str, numero: int) -> Carga | None:
+def _serie_confere(carga: Carga, dados: dict) -> bool:
+    # Série só vem se o relatório do GW tiver essa coluna. Minuta no GW é
+    # série "M"; na chave impressa a série é numérica, então aceita os dois.
+    if not carga.serie:
+        return True
+    serie = carga.serie.strip().upper()
+    if dados["modelo"] == chave_cte.MODELO_MINUTA:
+        return serie in ("M", dados["serie"])
+    return serie == dados["serie"]
+
+
+def buscar_carga(db: Session, dados: dict) -> Carga | None:
+    """Acha o CT-e/minuta da chave decodificada no banco -- mesma filial e
+    número; havendo mais de um (CT-e e minuta com o mesmo número), a série
+    decide quando o relatório a traz."""
     # No banco o número vem como no relatório do GW (ex: "088375", 6 dígitos
     # com zeros à esquerda); na chave são 9 dígitos -- testa as variações.
+    numero = dados["numero"]
     candidatos = {str(numero)} | {str(numero).zfill(w) for w in range(6, 10)}
-    return (
+    cargas = (
         db.query(Carga)
-        .filter(Carga.cnpj_filial == cnpj_filial, Carga.cte.in_(candidatos))
-        .first()
+        .filter(Carga.cnpj_filial == dados["cnpj_emitente"], Carga.cte.in_(candidatos))
+        .all()
     )
+    return next((c for c in cargas if _serie_confere(c, dados)), None)
 
 
 def _data(iso: str | None):
@@ -198,7 +214,7 @@ def _item_protocolo(db: Session, chave: str) -> dict | None:
         dados = chave_cte.decodificar(chave)
     except chave_cte.ChaveInvalida:
         return None
-    carga = buscar_carga(db, dados["cnpj_emitente"], dados["numero"])
+    carga = buscar_carga(db, dados)
     return {
         "cnpj_filial": dados["cnpj_emitente"],
         # DACTE Nº = conhecimento do parceiro; sem redespacho, o nosso.

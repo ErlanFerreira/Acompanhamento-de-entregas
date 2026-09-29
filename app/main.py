@@ -228,7 +228,7 @@ def _resultado_bipagem(db: Session, leitura: str) -> dict:
     except chave_cte.ChaveInvalida as exc:
         return {"ok": False, "leitura": leitura, "erro": str(exc)}
 
-    carga = relatorios_bipagem.buscar_carga(db, dados["cnpj_emitente"], dados["numero"])
+    carga = relatorios_bipagem.buscar_carga(db, dados)
     resultado = {"ok": True, **dados, "encontrado": carga is not None}
     if carga:
         resultado.update({
@@ -330,6 +330,7 @@ def api_bipagem_protocolo(payload: dict, db: Session = Depends(get_db)):
 
 _COLUNAS_BIPAGEM = [
     ("Chave de acesso", "chave"),
+    ("Tipo", "tipo"),
     ("CT-e", "numero"),
     ("Série", "serie"),
     ("CNPJ emitente", "cnpj_emitente_fmt"),
@@ -355,14 +356,16 @@ def api_bipagem_exportar(payload: dict, db: Session = Depends(get_db)):
     for leitura in leituras:
         r = _resultado_bipagem(db, leitura)
         if not r["ok"]:
-            ws.append([leitura, None, None, None, None, None, None, None, None, None, None, r["erro"], "Não"])
+            linha = [None] * len(_COLUNAS_BIPAGEM)
+            linha[0], linha[-2], linha[-1] = leitura, r["erro"], "Não"
+            ws.append(linha)
             continue
         linha = []
         for _, campo in _COLUNAS_BIPAGEM:
             v = r.get(campo)
             linha.append(("Sim" if v else "Não") if campo == "encontrado" else v)
         ws.append(linha)
-    for col, largura in zip("ABCDEFGHIJKLM", (48, 10, 7, 20, 18, 16, 12, 34, 34, 20, 5, 8, 9)):
+    for col, largura in zip("ABCDEFGHIJKLMN", (48, 8, 10, 7, 20, 18, 16, 12, 34, 34, 20, 5, 8, 9)):
         ws.column_dimensions[col].width = largura
     # Chave como texto -- senão o Excel mostra em notação científica.
     for (celula,) in ws.iter_rows(min_row=2, min_col=1, max_col=1):
