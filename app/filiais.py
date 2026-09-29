@@ -23,9 +23,15 @@ def fmt_cnpj(cnpj: str | None) -> str:
 
 def dados_filial(cnpj: str | None) -> dict:
     f = FILIAIS.get(cnpj or "", {})
+    # Filial sem cadastro próprio, mas da mesma empresa (mesma raiz de
+    # CNPJ) de uma cadastrada: usa a razão social dela (o endereço não).
+    razao = f.get("razao_social") or next(
+        (o["razao_social"] for c, o in FILIAIS.items() if cnpj and c[:8] == cnpj[:8] and o.get("razao_social")),
+        "",
+    )
     return {
         "cnpj": cnpj,
         "apelido": f.get("apelido") or fmt_cnpj(cnpj),
-        "razao_social": f.get("razao_social") or "",
+        "razao_social": razao,
         "endereco": f.get("endereco") or "",
     }

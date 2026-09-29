@@ -64,6 +64,9 @@ def buscar_carga(db: Session, dados: dict) -> Carga | None:
         .filter(Carga.cnpj_filial == dados["cnpj_emitente"], Carga.cte.in_(candidatos))
         .all()
     )
+    # Os que têm série (e ela confere) antes dos sem série, gravados antes
+    # do relatório trazer essa coluna.
+    cargas.sort(key=lambda c: c.serie is None)
     return next((c for c in cargas if _serie_confere(c, dados)), None)
 
 
