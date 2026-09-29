@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem
 from .db import get_db
-from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta
+from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
@@ -275,13 +275,25 @@ def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
         db.add(bip)
         db.commit()
     resultado["bipado_em"] = bip.bipado_em.isoformat() + "Z"
+    resultado["protocolo_id"] = bip.protocolo_id
     return resultado
 
 
 @app.delete("/api/bipagem", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_remover(chave: str, db: Session = Depends(get_db)):
     """Desfaz um bip (ex: bipado por engano) -- no controle de comprovantes
-    o CT-e volta a ficar sem data de envio."""
+    o CT-e volta a ficar sem data de envio. Não desfaz bip que já entrou num
+    protocolo de faturas (desfaça o protocolo antes)."""
+    faturado = (
+        db.query(Bipagem.protocolo_id)
+        .filter(Bipagem.chave == chave, Bipagem.protocolo_id.isnot(None))
+        .first()
+    )
+    if faturado:
+        return JSONResponse(
+            {"erro": f"Esse CT-e já está no protocolo de faturas nº {faturado[0]} -- desfaça o protocolo antes."},
+            status_code=409,
+        )
     db.query(Bipagem).filter(Bipagem.chave == chave).delete()
     db.commit()
     return {"ok": True}
@@ -320,13 +332,60 @@ def api_bipagem_controle(tomador: str, mes: str, responsavel: str = "", db: Sess
     return _xlsx_response(conteudo, f"controle_comprovantes_{sufixo}_{mes}.xlsx")
 
 
-@app.post("/api/bipagem/protocolo", dependencies=[Depends(require_acesso_completo_api)])
-def api_bipagem_protocolo(payload: dict, db: Session = Depends(get_db)):
-    """Protocolo de envio de faturas (modelo "ENVIO DE COMPROVANTE -
-    PETROCARGAS") dos CT-e bipados -- uma aba por filial + tomador."""
-    chaves = [str(x) for x in (payload.get("leituras") or [])][:2000]
-    conteudo = relatorios_bipagem.gerar_protocolo_faturas(db, chaves)
-    return _xlsx_response(conteudo, f"protocolo_faturas_{datetime.date.today().isoformat()}.xlsx")
+def _protocolo_to_dict(p: ProtocoloFatura) -> dict:
+    return {
+        "id": p.id,
+        # "Z": gravado em UTC -- sem isso o navegador mostra 3h adiantado.
+        "criado_em": p.criado_em.isoformat() + "Z" if p.criado_em else None,
+        "tomador_id": p.tomador_id,
+        "tomador_nome": p.tomador_nome,
+        "quantidade": p.quantidade,
+    }
+
+
+@app.get("/api/bipagem/faturas/pendentes", dependencies=[Depends(require_acesso_completo_api)])
+def api_faturas_pendentes(db: Session = Depends(get_db)):
+    """CT-e bipados que ainda não entraram em nenhum protocolo de faturas."""
+    return {"pendentes": relatorios_bipagem.faturas_pendentes(db)}
+
+
+@app.post("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_acesso_completo_api)])
+def api_faturas_gerar_protocolo(payload: dict, db: Session = Depends(get_db)):
+    """Gera o protocolo de envio de faturas (modelo "ENVIO DE COMPROVANTE -
+    PETROCARGAS") com os CT-e pendentes do tomador e dá baixa neles -- o
+    próximo protocolo não leva de novo os mesmos comprovantes. O arquivo
+    fica guardado; baixe por `/api/bipagem/faturas/protocolos/{id}/arquivo`."""
+    tomador = str(payload.get("tomador") or "")
+    protocolo = relatorios_bipagem.criar_protocolo_faturas(db, tomador)
+    if not protocolo:
+        return JSONResponse({"erro": "Nenhum CT-e pendente de protocolo para esse tomador."}, status_code=404)
+    chaves = [b.chave for b in db.query(Bipagem).filter(Bipagem.protocolo_id == protocolo.id)]
+    return {**_protocolo_to_dict(protocolo), "chaves": chaves}
+
+
+@app.get("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_acesso_completo_api)])
+def api_faturas_protocolos(db: Session = Depends(get_db)):
+    protocolos = db.query(ProtocoloFatura).order_by(ProtocoloFatura.criado_em.desc()).limit(50).all()
+    return {"protocolos": [_protocolo_to_dict(p) for p in protocolos]}
+
+
+@app.get("/api/bipagem/faturas/protocolos/{protocolo_id}/arquivo", dependencies=[Depends(require_acesso_completo_api)])
+def api_faturas_protocolo_arquivo(protocolo_id: int, db: Session = Depends(get_db)):
+    p = db.query(ProtocoloFatura).filter(ProtocoloFatura.id == protocolo_id).first()
+    if not p or not p.arquivo:
+        return JSONResponse({"erro": "Protocolo não encontrado."}, status_code=404)
+    nome = "".join(c for c in (p.tomador_nome or "") if c.isalnum() or c == " ").strip().replace(" ", "_")[:40]
+    data = relatorios_bipagem.data_br(p.criado_em).isoformat()
+    return _xlsx_response(p.arquivo, f"protocolo_faturas_{p.id}_{nome}_{data}.xlsx")
+
+
+@app.delete("/api/bipagem/faturas/protocolos/{protocolo_id}", dependencies=[Depends(require_acesso_completo_api)])
+def api_faturas_desfazer_protocolo(protocolo_id: int, db: Session = Depends(get_db)):
+    """Desfaz um protocolo gerado por engano -- os CT-e dele voltam a ficar
+    pendentes de protocolo."""
+    if not relatorios_bipagem.desfazer_protocolo(db, protocolo_id):
+        return JSONResponse({"erro": "Protocolo não encontrado."}, status_code=404)
+    return {"ok": True}
 
 
 _COLUNAS_BIPAGEM = [

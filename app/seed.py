@@ -13,6 +13,9 @@ _COLUNAS_ADICIONADAS = {
         "serie": "VARCHAR(10)",
         "filial": "VARCHAR(60)",
     },
+    "bipagens": {
+        "protocolo_id": "INTEGER",
+    },
 }
 
 

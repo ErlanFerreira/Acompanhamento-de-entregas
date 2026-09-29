@@ -298,3 +298,10 @@ tr.bip-row-warn td { background: color-mix(in srgb, var(--status-warning) 8%, tr
 .bip-form select { min-width: 280px; }
 [hidden] { display: none !important; }
 .bip-tag { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); vertical-align: 1px; }
+.bip-subtitulo { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); margin: 0 0 8px; }
+.bip-faturas { margin-bottom: 0; }
+.bip-faturas .table-scroll { max-height: 280px; }
+.bip-acoes { white-space: nowrap; text-align: right; }
+.bip-acoes .btn, .bip-acoes .btn-primary { padding: 3px 10px; font-size: 12px; }
+.bip-tag.faturado { background: color-mix(in srgb, var(--status-good) 16%, transparent); color: var(--success-text); }
+@media (max-width: 900px) { .bip-faturas { grid-template-columns: 1fr; } }

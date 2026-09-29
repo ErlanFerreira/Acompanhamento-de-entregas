@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from . import chave_cte
 from .filiais import dados_filial, fmt_cnpj
-from .models import Bipagem, Carga
+from .models import Bipagem, Carga, ProtocoloFatura
 
 MODELOS = Path(__file__).parent / "modelos"
 # Brasília sem horário de verão (abolido em 2019) -- evita depender do
@@ -346,3 +346,104 @@ def gerar_protocolo_faturas(db: Session, chaves: list[str]) -> bytes:
             ws.cell(row=linha, column=coluna + 1, value=item["nf"])
 
     return _salvar(wb)
+
+
+# ----------------------------------- controle de faturamento (protocolos) ----
+#
+# Os comprovantes chegam todo dia e são bipados conforme chegam; o protocolo
+# de faturas só deve levar os que ainda não foram faturados. Cada protocolo
+# gerado marca os bips que entraram nele (`Bipagem.protocolo_id`), e o
+# próximo protocolo do mesmo tomador só pega os pendentes.
+
+SEM_TOMADOR = "sem-tomador"
+
+
+def id_tomador(carga: Carga | None) -> str:
+    """Mesmo `id` de `tomadores_disponiveis`: raiz do CNPJ ou "nome:<nome>"."""
+    if carga is None:
+        return SEM_TOMADOR
+    if carga.cnpj_consignatario:
+        return carga.cnpj_consignatario[:8]
+    if (carga.consignatario or "").strip():
+        return PREFIXO_TOMADOR_NOME + carga.consignatario.strip()
+    return SEM_TOMADOR
+
+
+def _pendentes_por_tomador(db: Session) -> dict[str, dict]:
+    grupos: dict[str, dict] = {}
+    bips = (
+        db.query(Bipagem)
+        .filter(Bipagem.protocolo_id.is_(None))
+        .order_by(Bipagem.bipado_em.asc())
+        .all()
+    )
+    for bip in bips:
+        try:
+            dados = chave_cte.decodificar(bip.chave)
+        except chave_cte.ChaveInvalida:
+            continue
+        carga = buscar_carga(db, dados)
+        tid = id_tomador(carga)
+        nome = (carga.consignatario if carga else None) or "TOMADOR NÃO IDENTIFICADO (fora da base)"
+        g = grupos.setdefault(tid, {
+            "id": tid,
+            "nome": nome.strip(),
+            "cnpj_raiz": carga.cnpj_consignatario[:8] if carga and carga.cnpj_consignatario else None,
+            "quantidade": 0,
+            "bips": [],
+        })
+        g["quantidade"] += 1
+        g["bips"].append(bip)
+    return grupos
+
+
+def faturas_pendentes(db: Session) -> list[dict]:
+    """CT-e bipados que ainda não entraram em nenhum protocolo, por tomador."""
+    grupos = _pendentes_por_tomador(db)
+    return sorted(
+        ({k: v for k, v in g.items() if k != "bips"} for g in grupos.values()),
+        key=lambda g: (g["nome"] or "").upper(),
+    )
+
+
+def criar_protocolo_faturas(db: Session, tomador: str) -> ProtocoloFatura | None:
+    """Gera o protocolo com os CT-e pendentes do tomador e dá baixa neles.
+    Retorna `None` se não houver pendentes."""
+    grupo = _pendentes_por_tomador(db).get(tomador)
+    if not grupo:
+        return None
+
+    protocolo = ProtocoloFatura(tomador_id=tomador, tomador_nome=grupo["nome"], quantidade=0)
+    db.add(protocolo)
+    db.flush()
+    # Só marca os que continuam pendentes -- se outra pessoa gerou um
+    # protocolo ao mesmo tempo, os que ela já pegou ficam de fora deste.
+    ids = [b.id for b in grupo["bips"]]
+    db.query(Bipagem).filter(Bipagem.id.in_(ids), Bipagem.protocolo_id.is_(None)).update(
+        {Bipagem.protocolo_id: protocolo.id}, synchronize_session=False
+    )
+    chaves = [
+        b.chave for b in db.query(Bipagem)
+        .filter(Bipagem.protocolo_id == protocolo.id)
+        .order_by(Bipagem.bipado_em.asc())
+    ]
+    if not chaves:
+        db.rollback()
+        return None
+    protocolo.quantidade = len(chaves)
+    protocolo.arquivo = gerar_protocolo_faturas(db, chaves)
+    db.commit()
+    return protocolo
+
+
+def desfazer_protocolo(db: Session, protocolo_id: int) -> bool:
+    """Apaga o protocolo e devolve os CT-e dele pra lista de pendentes."""
+    protocolo = db.query(ProtocoloFatura).filter(ProtocoloFatura.id == protocolo_id).first()
+    if not protocolo:
+        return False
+    db.query(Bipagem).filter(Bipagem.protocolo_id == protocolo_id).update(
+        {Bipagem.protocolo_id: None}, synchronize_session=False
+    )
+    db.delete(protocolo)
+    db.commit()
+    return True

@@ -66,6 +66,24 @@ class Bipagem(Base):
     numero = Column(Integer, index=True)
     serie = Column(String(10))
     bipado_em = Column(DateTime, default=datetime.datetime.utcnow)
+    # Protocolo de faturas em que o CT-e já entrou -- `None` = ainda pendente
+    # de faturar. Evita que um comprovante recebido e faturado entre de novo
+    # no protocolo seguinte.
+    protocolo_id = Column(Integer, nullable=True, index=True)
+
+
+class ProtocoloFatura(Base):
+    """Um protocolo de envio de faturas gerado na tela de Bipagem. Guarda o
+    arquivo exatamente como foi gerado, pra poder baixar de novo depois."""
+
+    __tablename__ = "protocolos_fatura"
+
+    id = Column(Integer, primary_key=True)
+    criado_em = Column(DateTime, default=datetime.datetime.utcnow)
+    tomador_id = Column(String(300))  # raiz do CNPJ ou "nome:<nome>"
+    tomador_nome = Column(String(255))
+    quantidade = Column(Integer, default=0)
+    arquivo = Column(LargeBinary, nullable=True)
 
 
 class Meta(Base):

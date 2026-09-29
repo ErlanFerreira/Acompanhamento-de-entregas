@@ -36,12 +36,40 @@
     </div>
   </section>
 
+  <section class="table-section" style="margin-bottom: 20px;">
+    <div class="table-toolbar">
+      <h2>Protocolo de faturas</h2>
+      <span class="count">Cada protocolo leva só os CT-e bipados que ainda não entraram em nenhum protocolo — os já faturados não se repetem.</span>
+    </div>
+    <div class="grid-2 bip-faturas">
+      <div>
+        <h3 class="bip-subtitulo">Pendentes de protocolo</h3>
+        <div class="table-scroll">
+          <table class="detail">
+            <thead><tr><th>Tomador</th><th>CT-e</th><th></th></tr></thead>
+            <tbody id="pend-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="pend-vazio">Nenhum CT-e pendente de protocolo.</div>
+      </div>
+      <div>
+        <h3 class="bip-subtitulo">Protocolos gerados</h3>
+        <div class="table-scroll">
+          <table class="detail">
+            <thead><tr><th>Nº</th><th>Gerado em</th><th>Tomador</th><th>CT-e</th><th></th></tr></thead>
+            <tbody id="prot-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="prot-vazio">Nenhum protocolo gerado ainda.</div>
+      </div>
+    </div>
+  </section>
+
   <section class="table-section">
     <div class="table-toolbar">
       <h2>CT-e bipados</h2>
       <span class="count" id="bip-count"></span>
       <span class="filters-spacer"></span>
-      <button class="btn-primary" id="btn-protocolo" type="button" disabled title="Protocolo de envio de faturas com os CT-e/minutas desta lista">Gerar protocolo de faturas</button>
       <button class="btn" id="btn-exportar" type="button" disabled>Exportar lista</button>
       <button class="btn" id="btn-limpar" type="button" disabled>Limpar tela</button>
     </div>

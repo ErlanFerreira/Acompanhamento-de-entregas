@@ -10,7 +10,10 @@
   const count = document.getElementById("bip-count");
   const btnExportar = document.getElementById("btn-exportar");
   const btnLimpar = document.getElementById("btn-limpar");
-  const btnProtocolo = document.getElementById("btn-protocolo");
+  const pendBody = document.getElementById("pend-body");
+  const pendVazio = document.getElementById("pend-vazio");
+  const protBody = document.getElementById("prot-body");
+  const protVazio = document.getElementById("prot-vazio");
   const btnControle = document.getElementById("btn-controle");
   const fTomador = document.getElementById("f-tomador");
   const fMes = document.getElementById("f-mes");
@@ -61,7 +64,8 @@
         '<tr class="' + (r.encontrado ? "" : "bip-row-warn") + '">' +
           '<td class="num">' + n + '</td>' +
           '<td class="num"><strong>' + esc(r.numero) + '</strong>' +
-            (r.tipo && r.tipo !== "CT-e" ? ' <span class="bip-tag">' + esc(r.tipo) + '</span>' : "") + '</td>' +
+            (r.tipo && r.tipo !== "CT-e" ? ' <span class="bip-tag">' + esc(r.tipo) + '</span>' : "") +
+            (r.protocolo_id ? ' <span class="bip-tag faturado" title="Já entrou no protocolo de faturas nº ' + esc(r.protocolo_id) + '">Protocolo nº ' + esc(r.protocolo_id) + '</span>' : "") + '</td>' +
           '<td class="num">' + esc(r.serie) + '</td>' +
           '<td class="num">' + vazioSe(r.notas_fiscais) + '</td>' +
           '<td class="num">' + vazioSe(r.cte_redespacho) + '</td>' +
@@ -74,7 +78,7 @@
     }).join("");
     vazio.style.display = itens.length ? "none" : "";
     count.textContent = itens.length ? itens.length + " CT-e" : "";
-    btnExportar.disabled = btnLimpar.disabled = btnProtocolo.disabled = !itens.length;
+    btnExportar.disabled = btnLimpar.disabled = !itens.length;
   }
 
   async function processar(leitura) {
@@ -109,9 +113,11 @@
     else itens.unshift(r);
     salvar();
     render();
+    carregarFaturas();
     if (r.duplicado) {
       const quando = new Date(r.bipado_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-      mostrarFeedback("aviso", esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> já tinha sido bipado (" + esc(quando) + ").");
+      const noProtocolo = r.protocolo_id ? " Já está no protocolo de faturas nº " + esc(r.protocolo_id) + "." : "";
+      mostrarFeedback("aviso", esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> já tinha sido bipado (" + esc(quando) + ")." + noProtocolo);
       return;
     }
 
@@ -166,14 +172,19 @@
         method: "DELETE",
         credentials: "same-origin",
       });
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      if (!resp.ok) {
+        let msg = "HTTP " + resp.status;
+        try { msg = (await resp.json()).erro || msg; } catch (e) { /* resposta não-JSON */ }
+        throw new Error(msg);
+      }
     } catch (e) {
-      mostrarFeedback("erro", "Não consegui desfazer o bip (" + esc(e.message) + ").");
+      mostrarFeedback("erro", "Não consegui desfazer o bip: " + esc(e.message));
       return;
     }
     itens = itens.filter(function (x) { return x.chave !== chave; });
     salvar();
     render();
+    carregarFaturas();
     fLeitura.focus();
   });
 
@@ -226,8 +237,112 @@
     baixar("/api/bipagem/exportar", postJson({ leituras: chavesEmOrdem() }), "bipagem.xlsx", btnExportar);
   });
 
-  btnProtocolo.addEventListener("click", function () {
-    baixar("/api/bipagem/protocolo", postJson({ leituras: chavesEmOrdem() }), "protocolo_faturas.xlsx", btnProtocolo);
+  // ---------------------------------------------- protocolo de faturas ----
+
+  function fmtDataHora(iso) {
+    return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function baixarProtocolo(id, botao) {
+    return baixar("/api/bipagem/faturas/protocolos/" + id + "/arquivo", {}, "protocolo_faturas_" + id + ".xlsx", botao);
+  }
+
+  async function carregarFaturas() {
+    try {
+      const [rp, rh] = await Promise.all([
+        fetch("/api/bipagem/faturas/pendentes", { credentials: "same-origin" }),
+        fetch("/api/bipagem/faturas/protocolos", { credentials: "same-origin" }),
+      ]);
+      if (!rp.ok || !rh.ok) throw new Error("HTTP " + (rp.ok ? rh.status : rp.status));
+      const pendentes = (await rp.json()).pendentes || [];
+      const protocolos = (await rh.json()).protocolos || [];
+
+      pendBody.innerHTML = pendentes.map(function (g) {
+        const rotulo = g.cnpj_raiz ? g.nome + " (" + g.cnpj_raiz + ")" : g.nome;
+        return (
+          "<tr>" +
+            "<td>" + esc(rotulo) + "</td>" +
+            '<td class="num">' + esc(g.quantidade) + "</td>" +
+            '<td class="bip-acoes"><button class="btn-primary bip-gerar" type="button" data-tomador="' + esc(g.id) + '" data-nome="' + esc(g.nome) + '" data-qtd="' + esc(g.quantidade) + '">Gerar protocolo</button></td>' +
+          "</tr>"
+        );
+      }).join("");
+      pendVazio.style.display = pendentes.length ? "none" : "";
+
+      protBody.innerHTML = protocolos.map(function (p) {
+        return (
+          "<tr>" +
+            '<td class="num"><strong>' + esc(p.id) + "</strong></td>" +
+            "<td>" + esc(fmtDataHora(p.criado_em)) + "</td>" +
+            "<td>" + esc(p.tomador_nome) + "</td>" +
+            '<td class="num">' + esc(p.quantidade) + "</td>" +
+            '<td class="bip-acoes">' +
+              '<button class="btn bip-baixar" type="button" data-id="' + esc(p.id) + '">Baixar</button> ' +
+              '<button class="btn bip-desfazer" type="button" data-id="' + esc(p.id) + '" data-qtd="' + esc(p.quantidade) + '" title="Devolve os CT-e deste protocolo para os pendentes">Desfazer</button>' +
+            "</td>" +
+          "</tr>"
+        );
+      }).join("");
+      protVazio.style.display = protocolos.length ? "none" : "";
+    } catch (e) {
+      pendBody.innerHTML = "";
+      pendVazio.style.display = "";
+      pendVazio.textContent = "Falha ao carregar os pendentes (" + e.message + ").";
+    }
+  }
+
+  // Marca na lista da tela os CT-e que acabaram de entrar num protocolo.
+  function marcarFaturados(chaves, protocoloId) {
+    const conjunto = new Set(chaves || []);
+    itens.forEach(function (x) { if (conjunto.has(x.chave)) x.protocolo_id = protocoloId; });
+    salvar();
+    render();
+  }
+
+  pendBody.addEventListener("click", async function (ev) {
+    const btn = ev.target.closest(".bip-gerar");
+    if (!btn) return;
+    const msg = "Gerar o protocolo de faturas de " + btn.dataset.nome + " com " + btn.dataset.qtd +
+      " CT-e? Eles saem dos pendentes e não entram no próximo protocolo.";
+    if (!confirm(msg)) return;
+    btn.disabled = true;
+    try {
+      const resp = await fetch("/api/bipagem/faturas/protocolos", Object.assign({ credentials: "same-origin" }, postJson({ tomador: btn.dataset.tomador })));
+      const body = await resp.json();
+      if (!resp.ok) throw new Error(body.erro || "HTTP " + resp.status);
+      marcarFaturados(body.chaves, body.id);
+      mostrarFeedback("ok", "Protocolo de faturas nº <strong>" + esc(body.id) + "</strong> gerado com " + esc(body.quantidade) + " CT-e (" + esc(body.tomador_nome) + ").");
+      await carregarFaturas();
+      await baixarProtocolo(body.id, btn);
+    } catch (e) {
+      mostrarFeedback("erro", "Falha ao gerar o protocolo: " + esc(e.message));
+      btn.disabled = false;
+    }
+  });
+
+  protBody.addEventListener("click", async function (ev) {
+    const baixarBtn = ev.target.closest(".bip-baixar");
+    if (baixarBtn) {
+      baixarProtocolo(baixarBtn.dataset.id, baixarBtn);
+      return;
+    }
+    const desfazerBtn = ev.target.closest(".bip-desfazer");
+    if (!desfazerBtn) return;
+    const id = desfazerBtn.dataset.id;
+    if (!confirm("Desfazer o protocolo nº " + id + "? Os " + desfazerBtn.dataset.qtd + " CT-e dele voltam para os pendentes.")) return;
+    desfazerBtn.disabled = true;
+    try {
+      const resp = await fetch("/api/bipagem/faturas/protocolos/" + id, { method: "DELETE", credentials: "same-origin" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      itens.forEach(function (x) { if (String(x.protocolo_id) === String(id)) x.protocolo_id = null; });
+      salvar();
+      render();
+      mostrarFeedback("ok", "Protocolo nº " + esc(id) + " desfeito -- os CT-e voltaram para os pendentes.");
+      carregarFaturas();
+    } catch (e) {
+      mostrarFeedback("erro", "Falha ao desfazer o protocolo: " + esc(e.message));
+      desfazerBtn.disabled = false;
+    }
   });
 
   btnControle.addEventListener("click", function () {
@@ -287,4 +402,5 @@
   render();
   fLeitura.focus();
   carregarTomadores();
+  carregarFaturas();
 })();
