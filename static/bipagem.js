@@ -101,12 +101,14 @@
 
     if (!fTomador.value) selecionarTomador(idTomador(r));
 
-    const naTela = itens.some(function (x) { return x.chave === r.chave; });
-    if (!naTela) {
-      itens.unshift(r);
-      salvar();
-      render();
-    }
+    // Bipar de novo um que já está na tela atualiza a linha com os dados
+    // atuais do banco (ex: NF/parceiro que chegaram numa sincronização
+    // depois do primeiro bip).
+    const pos = itens.findIndex(function (x) { return x.chave === r.chave; });
+    if (pos >= 0) itens[pos] = r;
+    else itens.unshift(r);
+    salvar();
+    render();
     if (r.duplicado) {
       const quando = new Date(r.bipado_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
       mostrarFeedback("aviso", esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> já tinha sido bipado (" + esc(quando) + ").");
