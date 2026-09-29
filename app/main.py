@@ -303,14 +303,21 @@ def api_bipagem_tomadores(db: Session = Depends(get_db)):
 @app.get("/api/bipagem/controle", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_controle(tomador: str, mes: str, responsavel: str = "", db: Session = Depends(get_db)):
     """Controle mensal de comprovantes (modelo "SETEMBRO - GUANABARA") --
-    `tomador` é a raiz (8 dígitos) do CNPJ, `mes` no formato AAAA-MM."""
+    `tomador` é a raiz (8 dígitos) do CNPJ ou "nome:<nome>" (ver
+    `tomadores_disponiveis`), `mes` no formato AAAA-MM."""
     m = re.fullmatch(r"(\d{4})-(\d{2})", mes or "")
-    raiz = "".join(c for c in tomador if c.isdigit())[:8]
-    if not m or not 1 <= int(m.group(2)) <= 12 or len(raiz) != 8:
+    prefixo = relatorios_bipagem.PREFIXO_TOMADOR_NOME
+    if tomador.startswith(prefixo) and tomador[len(prefixo):].strip():
+        tomador_id, sufixo = tomador, "".join(c for c in tomador[len(prefixo):] if c.isalnum())[:30]
+    else:
+        tomador_id = sufixo = "".join(c for c in tomador if c.isdigit())[:8]
+        if len(tomador_id) != 8:
+            tomador_id = None
+    if not m or not 1 <= int(m.group(2)) <= 12 or not tomador_id:
         return JSONResponse({"erro": "Informe o tomador e o mês (AAAA-MM)."}, status_code=400)
     ano, mes_num = int(m.group(1)), int(m.group(2))
-    conteudo = relatorios_bipagem.gerar_controle_comprovantes(db, raiz, ano, mes_num, responsavel.strip())
-    return _xlsx_response(conteudo, f"controle_comprovantes_{raiz}_{mes}.xlsx")
+    conteudo = relatorios_bipagem.gerar_controle_comprovantes(db, tomador_id, ano, mes_num, responsavel.strip())
+    return _xlsx_response(conteudo, f"controle_comprovantes_{sufixo}_{mes}.xlsx")
 
 
 @app.post("/api/bipagem/protocolo", dependencies=[Depends(require_acesso_completo_api)])

@@ -99,10 +99,7 @@
       return;
     }
 
-    if (r.cnpj_consignatario && !fTomador.value) {
-      const raiz = r.cnpj_consignatario.slice(0, 8);
-      if (fTomador.querySelector('option[value="' + raiz + '"]')) fTomador.value = raiz;
-    }
+    if (!fTomador.value) selecionarTomador(idTomador(r));
 
     const naTela = itens.some(function (x) { return x.chave === r.chave; });
     if (!naTela) {
@@ -241,23 +238,39 @@
     baixar("/api/bipagem/controle?" + qs.toString(), {}, "controle_comprovantes.xlsx", btnControle);
   });
 
+  // Mesmo `id` de /api/bipagem/tomadores: raiz do CNPJ ou "nome:<nome>"
+  // (CT-e sincronizado antes de existir a coluna de CNPJ do tomador).
+  function idTomador(item) {
+    if (item.cnpj_consignatario) return item.cnpj_consignatario.slice(0, 8);
+    return item.consignatario ? "nome:" + item.consignatario.trim() : null;
+  }
+
+  function selecionarTomador(id) {
+    if (id && Array.prototype.some.call(fTomador.options, function (o) { return o.value === id; })) fTomador.value = id;
+  }
+
   async function carregarTomadores() {
     try {
       const resp = await fetch("/api/bipagem/tomadores", { credentials: "same-origin" });
-      const body = await resp.json();
-      const lista = body.tomadores || [];
+      if (!resp.ok) {
+        // Não mascara erro (sessão, servidor) como "base vazia".
+        fTomador.innerHTML = '<option value="">Falha ao carregar tomadores (HTTP ' + resp.status + ')</option>';
+        return;
+      }
+      const lista = (await resp.json()).tomadores || [];
       if (!lista.length) {
-        fTomador.innerHTML = '<option value="">Nenhum tomador na base (aguarde a próxima sincronização)</option>';
+        fTomador.innerHTML = '<option value="">Nenhum CT-e na base ainda</option>';
         return;
       }
       fTomador.innerHTML = '<option value="">Escolha…</option>' + lista.map(function (t) {
-        return '<option value="' + esc(t.cnpj_raiz) + '">' + esc(t.nome) + " (" + esc(t.cnpj_raiz) + ")</option>";
+        const rotulo = t.cnpj_raiz ? t.nome + " (" + t.cnpj_raiz + ")" : t.nome;
+        return '<option value="' + esc(t.id) + '">' + esc(rotulo) + "</option>";
       }).join("");
       // Pré-seleciona o tomador mais frequente entre os bipados na tela.
       const freq = {};
-      itens.forEach(function (x) { if (x.cnpj_consignatario) { const k = x.cnpj_consignatario.slice(0, 8); freq[k] = (freq[k] || 0) + 1; } });
+      itens.forEach(function (x) { const k = idTomador(x); if (k) freq[k] = (freq[k] || 0) + 1; });
       const top = Object.keys(freq).sort(function (a, b) { return freq[b] - freq[a]; })[0];
-      if (top && lista.some(function (t) { return t.cnpj_raiz === top; })) fTomador.value = top;
+      if (top) selecionarTomador(top);
     } catch (e) {
       fTomador.innerHTML = '<option value="">Falha ao carregar tomadores</option>';
     }

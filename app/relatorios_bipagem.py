@@ -18,6 +18,7 @@ import openpyxl
 from openpyxl.drawing.image import Image
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.formatting.formatting import ConditionalFormattingList
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from . import chave_cte
@@ -87,13 +88,31 @@ _LINHA_INICIAL = 9
 _NUM_COLUNAS = 17  # A..Q
 
 
-def gerar_controle_comprovantes(db: Session, cnpj_raiz: str, ano: int, mes: int, responsavel: str) -> bytes:
+def gerar_controle_comprovantes(db: Session, tomador: str, ano: int, mes: int, responsavel: str) -> bytes:
+    """`tomador` é o `id` de `tomadores_disponiveis`: raiz do CNPJ (8
+    dígitos) ou "nome:<nome>" pra CT-e ainda sem CNPJ do tomador."""
     inicio = datetime.date(ano, mes, 1)
     fim = datetime.date(ano + (mes == 12), mes % 12 + 1, 1)
+    if tomador.startswith(PREFIXO_TOMADOR_NOME):
+        nome = tomador[len(PREFIXO_TOMADOR_NOME):]
+        filtro_tomador = Carga.consignatario == nome
+    else:
+        # CT-e ainda sem CNPJ do tomador entram pelo nome, se for o mesmo
+        # nome que esse CNPJ tem nos CT-e que já têm.
+        nomes = [
+            n for (n,) in db.query(Carga.consignatario)
+            .filter(Carga.cnpj_consignatario.like(f"{tomador}%"))
+            .distinct()
+            if n
+        ]
+        filtro_tomador = or_(
+            Carga.cnpj_consignatario.like(f"{tomador}%"),
+            and_(Carga.cnpj_consignatario.is_(None), Carga.consignatario.in_(nomes)),
+        )
     cargas = (
         db.query(Carga)
         .filter(
-            Carga.cnpj_consignatario.like(f"{cnpj_raiz}%"),
+            filtro_tomador,
             Carga.emissao >= inicio.isoformat(),
             Carga.emissao < fim.isoformat(),
         )
@@ -165,14 +184,34 @@ def gerar_controle_comprovantes(db: Session, cnpj_raiz: str, ano: int, mes: int,
     return _salvar(wb)
 
 
+PREFIXO_TOMADOR_NOME = "nome:"
+
+
 def tomadores_disponiveis(db: Session) -> list[dict]:
-    """Tomadores (agrupados pela raiz do CNPJ -- matriz + filiais do
-    parceiro) com CT-e na base, pro seletor do controle mensal."""
+    """Tomadores com CT-e na base, pro seletor do controle mensal --
+    agrupados pela raiz do CNPJ (matriz + filiais do parceiro). CT-e ainda
+    sem CNPJ do tomador (sincronizados antes dessa coluna existir) entram
+    pelo nome, com `id` "nome:<nome>"."""
+    linhas = (
+        db.query(Carga.cnpj_consignatario, Carga.consignatario, func.count())
+        .group_by(Carga.cnpj_consignatario, Carga.consignatario)
+        .all()
+    )
     grupos: dict[str, dict] = {}
-    for cnpj, nome in db.query(Carga.cnpj_consignatario, Carga.consignatario).filter(Carga.cnpj_consignatario.isnot(None)):
-        raiz = cnpj[:8]
-        g = grupos.setdefault(raiz, {"cnpj_raiz": raiz, "nome": nome, "total": 0})
-        g["total"] += 1
+    nomes_com_cnpj: set[str] = set()
+    for cnpj, nome, total in linhas:
+        if cnpj:
+            raiz = cnpj[:8]
+            g = grupos.setdefault(raiz, {"id": raiz, "cnpj_raiz": raiz, "nome": nome, "total": 0})
+            g["total"] += total
+            nomes_com_cnpj.add((nome or "").strip().upper())
+    for cnpj, nome, total in linhas:
+        nome_norm = (nome or "").strip().upper()
+        if cnpj or not nome_norm or nome_norm in nomes_com_cnpj:
+            continue
+        chave = PREFIXO_TOMADOR_NOME + nome.strip()
+        g = grupos.setdefault(chave, {"id": chave, "cnpj_raiz": None, "nome": nome.strip(), "total": 0})
+        g["total"] += total
     return sorted(grupos.values(), key=lambda g: (g["nome"] or "").upper())
 
 
