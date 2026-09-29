@@ -5,24 +5,19 @@
   <header class="app-header">
     <div>
       <h1>Bipagem de CT-e</h1>
-      <p>Bipe o código de barras (ou o QR Code) do DACTE. O número do CT-e sai da própria chave; a NF, o CT-e do parceiro e o tomador vêm da última sincronização com o GW.</p>
+      <p>Bipe o código de barras (ou o QR Code) do DACTE ou da minuta. O número sai da própria chave; a NF, o CT-e do parceiro e o tomador vêm da última sincronização com o GW. O mesmo bip vale para o controle de comprovantes e para o protocolo de faturas.</p>
     </div>
     <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
   </header>
 
   <section class="table-section" style="margin-bottom: 20px;">
-    <div class="filter-group" style="margin-bottom: 12px;" role="radiogroup" aria-label="Finalidade">
-      <span class="filter-label">Finalidade</span>
-      <button type="button" class="chip bip-finalidade" data-finalidade="comprovante">Envio de comprovantes</button>
-      <button type="button" class="chip bip-finalidade" data-finalidade="fatura">Envio de faturas</button>
-    </div>
     <label class="bip-label" for="f-leitura">Código de barras do CT-e</label>
     <input type="text" id="f-leitura" class="bip-input" autocomplete="off" autofocus
            inputmode="numeric" placeholder="Clique aqui e bipe o DACTE…">
     <div class="bip-feedback" id="bip-feedback" role="status" aria-live="polite"></div>
   </section>
 
-  <section class="table-section bip-relatorio" data-para="comprovante" style="margin-bottom: 20px;">
+  <section class="table-section" style="margin-bottom: 20px;">
     <div class="table-toolbar">
       <h2>Controle de comprovantes do mês</h2>
       <span class="count">Todos os CT-e do mês do tomador; os bipados aqui saem como "Recebido" com a data do bip.</span>
@@ -46,7 +41,7 @@
       <h2>CT-e bipados</h2>
       <span class="count" id="bip-count"></span>
       <span class="filters-spacer"></span>
-      <button class="btn-primary bip-relatorio" data-para="fatura" id="btn-protocolo" type="button" disabled>Gerar protocolo de faturas</button>
+      <button class="btn-primary" id="btn-protocolo" type="button" disabled title="Protocolo de envio de faturas com os CT-e/minutas desta lista">Gerar protocolo de faturas</button>
       <button class="btn" id="btn-exportar" type="button" disabled>Exportar lista</button>
       <button class="btn" id="btn-limpar" type="button" disabled>Limpar tela</button>
     </div>

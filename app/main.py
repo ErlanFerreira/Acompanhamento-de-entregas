@@ -248,31 +248,26 @@ def _resultado_bipagem(db: Session, leitura: str) -> dict:
     return resultado
 
 
-def _validar_finalidade(finalidade: str):
-    if finalidade not in relatorios_bipagem.FINALIDADES:
-        raise HTTPException(status_code=400, detail="Finalidade inválida.")
-
-
 @app.post("/api/bipagem", dependencies=[Depends(require_acesso_completo_api)])
 def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
-    """Registra um bip. Repetir a mesma chave na mesma finalidade não cria
-    outro registro -- volta `duplicado` com a data do primeiro bip."""
-    finalidade = payload.get("finalidade") or ""
-    _validar_finalidade(finalidade)
+    """Registra um bip -- o mesmo bip vale pro controle de comprovantes e
+    pro protocolo de faturas. Repetir a mesma chave não cria outro registro:
+    volta `duplicado` com a data do primeiro bip."""
     resultado = _resultado_bipagem(db, str(payload.get("leitura") or ""))
     if not resultado["ok"]:
         return resultado
 
     bip = (
         db.query(Bipagem)
-        .filter(Bipagem.chave == resultado["chave"], Bipagem.finalidade == finalidade)
+        .filter(Bipagem.chave == resultado["chave"])
+        .order_by(Bipagem.bipado_em.asc())
         .first()
     )
     resultado["duplicado"] = bip is not None
     if not bip:
         bip = Bipagem(
             chave=resultado["chave"],
-            finalidade=finalidade,
+            finalidade=relatorios_bipagem.FINALIDADE_GERAL,
             cnpj_filial=resultado["cnpj_emitente"],
             numero=resultado["numero"],
             serie=resultado["serie"],
@@ -284,11 +279,10 @@ def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/bipagem", dependencies=[Depends(require_acesso_completo_api)])
-def api_bipagem_remover(chave: str, finalidade: str, db: Session = Depends(get_db)):
+def api_bipagem_remover(chave: str, db: Session = Depends(get_db)):
     """Desfaz um bip (ex: bipado por engano) -- no controle de comprovantes
     o CT-e volta a ficar sem data de envio."""
-    _validar_finalidade(finalidade)
-    db.query(Bipagem).filter(Bipagem.chave == chave, Bipagem.finalidade == finalidade).delete()
+    db.query(Bipagem).filter(Bipagem.chave == chave).delete()
     db.commit()
     return {"ok": True}
 

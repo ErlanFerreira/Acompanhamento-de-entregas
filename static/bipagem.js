@@ -17,21 +17,31 @@
   const fResponsavel = document.getElementById("f-responsavel");
 
   const STATUS_LABEL = { PE: "Pendente", DP: "Entregue no prazo", FPE: "Entregue fora do prazo" };
-  const FINALIDADE_LABEL = { comprovante: "comprovantes", fatura: "faturas" };
-
-  // Cada finalidade tem sua própria lista na tela (guardada no navegador
-  // pra não perder a conferência se a página recarregar). O registro que
-  // vale para os relatórios fica no servidor.
-  let finalidade = lerStorage("bipagem:finalidade") || "comprovante";
+  // Lista da tela (guardada no navegador pra não perder a conferência se a
+  // página recarregar). O registro que vale para os relatórios fica no
+  // servidor -- o mesmo bip serve pro controle e pro protocolo.
+  const STORAGE_KEY = "bipagem:itens";
   let itens = [];
 
   function lerStorage(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
   function gravarStorage(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* sem storage */ } }
-  function chaveLista() { return "bipagem:itens:" + finalidade; }
-  function carregar() {
-    try { return JSON.parse(lerStorage(chaveLista())) || []; } catch (e) { return []; }
+  function lerLista(k) {
+    try { return JSON.parse(lerStorage(k)) || []; } catch (e) { return []; }
   }
-  function salvar() { gravarStorage(chaveLista(), JSON.stringify(itens)); }
+  function carregar() {
+    // Junta as listas antigas, de quando comprovantes e faturas eram
+    // bipados separadamente.
+    const lista = lerLista(STORAGE_KEY);
+    ["bipagem:itens:comprovante", "bipagem:itens:fatura"].forEach(function (k) {
+      lerLista(k).forEach(function (x) {
+        if (!lista.some(function (y) { return y.chave === x.chave; })) lista.push(x);
+      });
+      try { localStorage.removeItem(k); } catch (e) { /* sem storage */ }
+    });
+    try { localStorage.removeItem("bipagem:finalidade"); } catch (e) { /* sem storage */ }
+    return lista;
+  }
+  function salvar() { gravarStorage(STORAGE_KEY, JSON.stringify(itens)); }
 
   function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
   function vazioSe(v) { return v ? esc(v) : '<span class="bip-muted">—</span>'; }
@@ -39,23 +49,6 @@
   function mostrarFeedback(tipo, html) {
     feedback.className = "bip-feedback show " + tipo;
     feedback.innerHTML = html;
-  }
-
-  function selecionarFinalidade(f) {
-    finalidade = f;
-    gravarStorage("bipagem:finalidade", f);
-    document.querySelectorAll(".bip-finalidade").forEach(function (b) {
-      const ativo = b.dataset.finalidade === f;
-      b.classList.toggle("active", ativo);
-      b.setAttribute("aria-checked", ativo ? "true" : "false");
-    });
-    document.querySelectorAll(".bip-relatorio").forEach(function (el) {
-      el.hidden = el.dataset.para !== f;
-    });
-    itens = carregar();
-    feedback.className = "bip-feedback";
-    render();
-    fLeitura.focus();
   }
 
   function render() {
@@ -92,7 +85,7 @@
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leitura: leitura, finalidade: finalidade }),
+        body: JSON.stringify({ leitura: leitura }),
       });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       r = await resp.json();
@@ -119,7 +112,7 @@
     }
     if (r.duplicado) {
       const quando = new Date(r.bipado_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-      mostrarFeedback("aviso", esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> já tinha sido bipado em " + FINALIDADE_LABEL[finalidade] + " (" + esc(quando) + ").");
+      mostrarFeedback("aviso", esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> já tinha sido bipado (" + esc(quando) + ").");
       return;
     }
 
@@ -165,16 +158,12 @@
     if (!ev.target.closest("button, a, input, select, textarea, label")) fLeitura.focus();
   });
 
-  document.querySelectorAll(".bip-finalidade").forEach(function (b) {
-    b.addEventListener("click", function () { selecionarFinalidade(b.dataset.finalidade); });
-  });
-
   tbody.addEventListener("click", async function (ev) {
     const btn = ev.target.closest(".bip-remover");
     if (!btn) return;
     const chave = btn.dataset.chave;
     try {
-      const resp = await fetch("/api/bipagem?chave=" + encodeURIComponent(chave) + "&finalidade=" + finalidade, {
+      const resp = await fetch("/api/bipagem?chave=" + encodeURIComponent(chave), {
         method: "DELETE",
         credentials: "same-origin",
       });
@@ -278,6 +267,9 @@
   fMes.value = hoje.getFullYear() + "-" + String(hoje.getMonth() + 1).padStart(2, "0");
   fResponsavel.value = lerStorage("bipagem:responsavel") || "";
 
-  selecionarFinalidade(finalidade === "fatura" ? "fatura" : "comprovante");
+  itens = carregar();
+  salvar();
+  render();
+  fLeitura.focus();
   carregarTomadores();
 })();

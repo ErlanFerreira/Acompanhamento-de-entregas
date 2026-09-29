@@ -3,7 +3,7 @@
 logo, cores, fórmulas e layout de impressão):
 
 - Controle de comprovantes (`controle_comprovantes.xlsx`): todos os CT-e do
-  mês de um tomador; os bipados como "comprovante" ganham a data do bip em
+  mês de um tomador; os bipados ganham a data do (primeiro) bip em
   "Data de Envio ao Financeiro/Arquivo" e viram "Recebido".
 - Protocolo de envio de faturas (`protocolo_envio.xlsx`): lista "DACTE Nº /
   Nota Fiscal" dos CT-e bipados, uma aba por filial + tomador (o recebedor).
@@ -29,7 +29,10 @@ MODELOS = Path(__file__).parent / "modelos"
 # pacote tzdata, que não vem no Windows.
 FUSO_BR = datetime.timezone(datetime.timedelta(hours=-3))
 
-FINALIDADES = ("comprovante", "fatura")
+# Um bip serve pros dois documentos. Registros antigos podem ter
+# "comprovante"/"fatura" (quando as listas eram separadas) -- as consultas
+# ignoram a finalidade.
+FINALIDADE_GERAL = "geral"
 
 
 def data_br(dt_utc: datetime.datetime) -> datetime.date:
@@ -98,13 +101,13 @@ def gerar_controle_comprovantes(db: Session, cnpj_raiz: str, ano: int, mes: int,
         .all()
     )
 
-    # Primeiro bip de comprovante de cada CT-e -- (filial, número) -> bip.
+    # Primeiro bip de cada CT-e -- (filial, número) -> bip.
     bips: dict[tuple[str, int], Bipagem] = {}
     filiais = {c.cnpj_filial for c in cargas}
     if filiais:
         for b in (
             db.query(Bipagem)
-            .filter(Bipagem.finalidade == "comprovante", Bipagem.cnpj_filial.in_(filiais))
+            .filter(Bipagem.cnpj_filial.in_(filiais))
             .order_by(Bipagem.bipado_em.asc())
         ):
             bips.setdefault((b.cnpj_filial, b.numero), b)

@@ -59,7 +59,9 @@ class Bipagem(Base):
 
     id = Column(Integer, primary_key=True)
     chave = Column(String(44), nullable=False, index=True)
-    finalidade = Column(String(20), nullable=False)  # comprovante|fatura
+    # "geral" -- o mesmo bip vale pros dois relatórios. Bips antigos podem
+    # ter "comprovante"/"fatura", de quando as listas eram separadas.
+    finalidade = Column(String(20), nullable=False)
     cnpj_filial = Column(String(20), index=True)
     numero = Column(Integer, index=True)
     serie = Column(String(10))

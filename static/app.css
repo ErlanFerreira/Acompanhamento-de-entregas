@@ -293,7 +293,6 @@ input[type="text"].bip-input { width: 100%; box-sizing: border-box; font-size: 2
 .bip-muted { color: var(--text-muted); }
 tr.bip-row-warn td { background: color-mix(in srgb, var(--status-warning) 8%, transparent); }
 .bip-remover { padding: 2px 8px; }
-.chip.bip-finalidade.active { background: var(--accent); }
 .bip-form { align-items: flex-end; gap: 12px; }
 .bip-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-secondary); }
 .bip-form select { min-width: 280px; }
