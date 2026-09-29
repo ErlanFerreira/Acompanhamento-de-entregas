@@ -12,6 +12,7 @@ logo, cores, fórmulas e layout de impressão):
 import copy
 import datetime
 import io
+import zipfile
 from pathlib import Path
 
 import openpyxl
@@ -82,7 +83,24 @@ def _int_se_numero(v):
 def _salvar(wb) -> bytes:
     buffer = io.BytesIO()
     wb.save(buffer)
-    return buffer.getvalue()
+    return preservar_espacos(buffer.getvalue())
+
+
+def preservar_espacos(xlsx: bytes) -> bytes:
+    """O openpyxl grava trechos de rich text só com espaços (a linha da
+    assinatura no rodapé do protocolo) como `<t>   </t>`, sem
+    `xml:space="preserve"` -- o Excel lê isso como trecho vazio e acusa
+    "Encontramos um problema em um conteúdo" ao abrir. Marca todos os `<t>`
+    pra preservar os espaços."""
+    entrada = zipfile.ZipFile(io.BytesIO(xlsx))
+    saida_buffer = io.BytesIO()
+    with zipfile.ZipFile(saida_buffer, "w", zipfile.ZIP_DEFLATED) as saida:
+        for item in entrada.infolist():
+            dados = entrada.read(item.filename)
+            if item.filename.startswith("xl/worksheets/sheet") or item.filename == "xl/sharedStrings.xml":
+                dados = dados.replace(b"<t>", b'<t xml:space="preserve">')
+            saida.writestr(item, dados)
+    return saida_buffer.getvalue()
 
 
 # ------------------------------------------------ controle de comprovantes ----

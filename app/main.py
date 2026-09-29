@@ -376,7 +376,10 @@ def api_faturas_protocolo_arquivo(protocolo_id: int, db: Session = Depends(get_d
         return JSONResponse({"erro": "Protocolo não encontrado."}, status_code=404)
     nome = "".join(c for c in (p.tomador_nome or "") if c.isalnum() or c == " ").strip().replace(" ", "_")[:40]
     data = relatorios_bipagem.data_br(p.criado_em).isoformat()
-    return _xlsx_response(p.arquivo, f"protocolo_faturas_{p.id}_{nome}_{data}.xlsx")
+    # `preservar_espacos` de novo: protocolos gerados antes dessa correção
+    # ficaram guardados com o defeito que faz o Excel pedir pra reparar.
+    arquivo = relatorios_bipagem.preservar_espacos(p.arquivo)
+    return _xlsx_response(arquivo, f"protocolo_faturas_{p.id}_{nome}_{data}.xlsx")
 
 
 @app.delete("/api/bipagem/faturas/protocolos/{protocolo_id}", dependencies=[Depends(require_acesso_completo_api)])
