@@ -5,8 +5,8 @@ logo, cores, fórmulas e layout de impressão):
 - Controle de comprovantes (`controle_comprovantes.xlsx`): todos os CT-e do
   mês de um tomador; os bipados ganham a data do (primeiro) bip em
   "Data de Envio ao Financeiro/Arquivo" e viram "Recebido".
-- Protocolo de envio de faturas (`protocolo_envio.xlsx`): lista "DACTE Nº /
-  Nota Fiscal" dos CT-e bipados, uma aba por filial + tomador (o recebedor).
+- Protocolo de envio de faturas (`protocolo_envio.xlsx`): lista "DACTE / NF"
+  dos CT-e bipados, uma aba por filial + tomador (o recebedor).
 """
 
 import copy
@@ -238,14 +238,12 @@ def tomadores_disponiveis(db: Session) -> list[dict]:
 
 # ------------------------------------------------ protocolo de faturas ----
 
-# Cada página do modelo tem 34 linhas com dois pares "DACTE Nº / NOTA
-# FISCAL" (colunas B/C e D/E); são duas páginas por aba.
-_SLOTS_PROTOCOLO = (
-    [(r, 2) for r in range(11, 45)]
-    + [(r, 4) for r in range(11, 45)]
-    + [(r, 2) for r in range(55, 89)]
-    + [(r, 4) for r in range(55, 89)]
-)
+# O modelo tem uma página por aba, com 41 linhas (10 a 50; a 51 é só um
+# espaçador) e dois pares "DACTE / NF": colunas A (mesclada com B) / C e
+# D / E. Preenche o primeiro par de cima a baixo, depois o segundo.
+# Cada posição: (linha, coluna do DACTE, coluna da NF).
+_LINHAS_PROTOCOLO = range(10, 51)
+_SLOTS_PROTOCOLO = [(r, 1, 3) for r in _LINHAS_PROTOCOLO] + [(r, 4, 5) for r in _LINHAS_PROTOCOLO]
 # Como o emitente aparece no modelo (que foi feito pra matriz).
 _EMITENTE_MODELO = {
     "razao_social": "G. FREIRE BEZERRA DE MORAIS",
@@ -346,22 +344,22 @@ def gerar_protocolo_faturas(db: Session, chaves: list[str]) -> bytes:
         razao = filial["razao_social"] or filial["apelido"]
 
         ws.title = _titulo_aba(primeiro.get("tomador_nome") or "Protocolo", titulos)
-        ws["C2"] = primeiro.get("tomador_nome")
-        ws["C3"] = primeiro.get("tomador_endereco")
-        ws["C4"] = fmt_cnpj(primeiro.get("tomador_cnpj")) or None
-        ws["E4"] = primeiro.get("tomador_cidade")
-        # Emitente: o modelo já vem com os dados da matriz -- troca só o
-        # texto dentro da formatação (negrito "CNPJ:"/"Endereço:", linhas
-        # sublinhadas da assinatura), sem perder o rich text da célula.
-        _substituir(ws["B6"], _EMITENTE_MODELO["razao_social"], razao)
-        _substituir(ws["D6"], _EMITENTE_MODELO["cnpj"], fmt_cnpj(filial["cnpj"]))
-        _substituir(ws["B7"], _EMITENTE_MODELO["endereco"], filial["endereco"])
-        for coord in ("B45", "B89"):
-            _substituir(ws[coord], _EMITENTE_MODELO["razao_social"], razao)
+        # Recebedor = tomador do serviço.
+        ws["B5"] = primeiro.get("tomador_nome")
+        ws["B6"] = primeiro.get("tomador_endereco")
+        ws["B7"] = fmt_cnpj(primeiro.get("tomador_cnpj")) or None
+        ws["E7"] = primeiro.get("tomador_cidade")
+        # Emitente (faixa azul do topo): o modelo já vem com os dados da
+        # matriz -- troca só o texto dentro da formatação (negrito
+        # "CNPJ:"/"Endereço:"), sem perder o rich text da célula.
+        _substituir(ws["C1"], _EMITENTE_MODELO["razao_social"], razao)
+        _substituir(ws["E1"], _EMITENTE_MODELO["cnpj"], fmt_cnpj(filial["cnpj"]))
+        _substituir(ws["C2"], _EMITENTE_MODELO["endereco"], filial["endereco"])
 
-        for (linha, coluna), item in zip(_SLOTS_PROTOCOLO, itens):
-            ws.cell(row=linha, column=coluna, value=item["dacte"])
-            ws.cell(row=linha, column=coluna + 1, value=item["nf"])
+        for (linha, col_dacte, col_nf), item in zip(_SLOTS_PROTOCOLO, itens):
+            for coluna, valor in ((col_dacte, item["dacte"]), (col_nf, item["nf"])):
+                celula = ws.cell(row=linha, column=coluna, value=valor)
+                celula.alignment = celula.alignment.copy(horizontal="center")
 
     return _salvar(wb)
 

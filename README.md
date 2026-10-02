@@ -26,9 +26,9 @@ uma senha única compartilhada (sem contas de usuário).
     tomador (raiz do CNPJ); os bipados saem com a data do bip em "Data de
     Envio ao Financeiro/Arquivo" e status "Recebido".
   - **Envio de faturas** → "Protocolo de faturas" (modelo
-    `app/modelos/protocolo_envio.xlsx`): DACTE Nº (CT-e do parceiro; sem
+    `app/modelos/protocolo_envio.xlsx`): DACTE (CT-e do parceiro; sem
     redespacho, o nosso) + NF dos bipados, uma aba por filial + tomador —
-    o recebedor é o tomador do CT-e. 136 CT-e por aba (2 páginas).
+    o recebedor é o tomador do CT-e. 82 CT-e por aba (1 página).
   - Dados do emitente (razão social/endereço por CNPJ de filial) ficam em
     `app/filiais.py`.
 
