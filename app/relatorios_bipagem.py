@@ -13,6 +13,7 @@ import copy
 import datetime
 import io
 import zipfile
+from collections import Counter
 from pathlib import Path
 
 import openpyxl
@@ -310,20 +311,40 @@ def _titulo_aba(nome: str, usados: set[str]) -> str:
     return titulo
 
 
+def _recebedor(itens: list[dict]) -> dict:
+    """Dados do recebedor de um grupo consolidado (cliente com vários CNPJ,
+    mesma raiz): a matriz (/0001) se estiver entre os CT-e, senão o CNPJ
+    que mais aparece; o nome é o mais frequente (o mesmo cliente às vezes
+    vem como "LTDA" e "LIMITADA")."""
+    if not itens:
+        return {}
+    contagem = Counter(i["tomador_cnpj"] for i in itens if i["tomador_cnpj"])
+    matriz = sorted(c for c in contagem if c[8:12] == "0001")
+    cnpj = matriz[0] if matriz else (contagem.most_common(1)[0][0] if contagem else None)
+    base = next((i for i in itens if i["tomador_cnpj"] == cnpj), itens[0])
+    nome = Counter(i["tomador_nome"] for i in itens).most_common(1)[0][0]
+    return {**base, "tomador_nome": nome}
+
+
 def gerar_protocolo_faturas(db: Session, chaves: list[str]) -> bytes:
+    # Um grupo (aba) por filial emitente + cliente. Cliente com vários CNPJ
+    # (filiais dele, mesma raiz -- ex: FL Brasil, Modular, Capivari) sai
+    # consolidado numa aba só.
     grupos: dict[tuple, list[dict]] = {}
     for chave in chaves:
         item = _item_protocolo(db, chave)
         if item:
-            k = (item["cnpj_filial"], item["tomador_cnpj"] or item["tomador_nome"])
-            grupos.setdefault(k, []).append(item)
+            cliente = item["tomador_cnpj"][:8] if item["tomador_cnpj"] else item["tomador_nome"]
+            grupos.setdefault((item["cnpj_filial"], cliente), []).append(item)
 
     capacidade = len(_SLOTS_PROTOCOLO)
+    # (recebedor, itens da aba) -- grupo com mais CT-e do que cabe numa aba
+    # continua em outra aba, com o mesmo recebedor.
     folhas = [
-        itens[i:i + capacidade]
+        (_recebedor(itens), itens[i:i + capacidade])
         for itens in grupos.values()
         for i in range(0, len(itens), capacidade)
-    ] or [[]]
+    ] or [({}, [])]
 
     wb = openpyxl.load_workbook(MODELOS / "protocolo_envio.xlsx", rich_text=True)
     base = wb.active
@@ -338,8 +359,7 @@ def gerar_protocolo_faturas(db: Session, chaves: list[str]) -> bytes:
         abas.append(nova)
 
     titulos: set[str] = set()
-    for ws, itens in zip(abas, folhas):
-        primeiro = itens[0] if itens else {}
+    for ws, (primeiro, itens) in zip(abas, folhas):
         filial = dados_filial(primeiro.get("cnpj_filial"))
         razao = filial["razao_social"] or filial["apelido"]
 
