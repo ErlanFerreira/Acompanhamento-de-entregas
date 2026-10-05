@@ -446,6 +446,30 @@ def consultas_page(request: Request):
     return templates.TemplateResponse("consultas.html", {"request": request, "active": "consultas"})
 
 
+# Tempo máximo que um job pode ficar "pendente" (workflow disparado, mas o
+# run_consulta.py ainda não começou). O GitHub cancela por conta própria um
+# job que não consegue máquina após ~15 min, e nesse caso nada atualiza o
+# banco -- sem isso a linha ficaria "Na fila" para sempre.
+_MINUTOS_MAX_PENDENTE = 20
+
+
+def _expirar_jobs_sem_iniciar(db: Session) -> None:
+    limite = datetime.datetime.utcnow() - datetime.timedelta(minutes=_MINUTOS_MAX_PENDENTE)
+    expirados = (
+        db.query(ConsultaJob)
+        .filter(ConsultaJob.status == "pendente", ConsultaJob.criado_em < limite)
+        .all()
+    )
+    for job in expirados:
+        job.status = "erro"
+        job.erro_mensagem = (
+            f"A consulta não iniciou em {_MINUTOS_MAX_PENDENTE} minutos (o GitHub Actions "
+            "não alocou uma máquina). Exclua e envie a planilha novamente."
+        )
+    if expirados:
+        db.commit()
+
+
 def _job_to_dict(job: ConsultaJob) -> dict:
     return {
         "id": job.id,
@@ -463,12 +487,14 @@ def _job_to_dict(job: ConsultaJob) -> dict:
 
 @app.get("/api/consultas", dependencies=[Depends(require_auth_api)])
 def api_consultas_list(db: Session = Depends(get_db)):
+    _expirar_jobs_sem_iniciar(db)
     jobs = db.query(ConsultaJob).order_by(ConsultaJob.criado_em.desc()).limit(30).all()
     return {"jobs": [_job_to_dict(j) for j in jobs]}
 
 
 @app.get("/api/consultas/{job_id}", dependencies=[Depends(require_auth_api)])
 def api_consultas_status(job_id: int, db: Session = Depends(get_db)):
+    _expirar_jobs_sem_iniciar(db)
     job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
     if not job:
         return JSONResponse({"erro": "Job não encontrado."}, status_code=404)
