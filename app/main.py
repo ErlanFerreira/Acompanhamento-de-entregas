@@ -451,6 +451,9 @@ def consultas_page(request: Request):
 # job que não consegue máquina após ~15 min, e nesse caso nada atualiza o
 # banco -- sem isso a linha ficaria "Na fila" para sempre.
 _MINUTOS_MAX_PENDENTE = 20
+# Tempo máximo sem sinal de vida de um job "processando" -- o script avisa a
+# cada NF consultada (poucos segundos cada), então 15 min parado = morreu.
+_MINUTOS_MAX_SEM_SINAL = 15
 
 
 def _expirar_jobs_sem_iniciar(db: Session) -> None:
@@ -466,7 +469,19 @@ def _expirar_jobs_sem_iniciar(db: Session) -> None:
             f"A consulta não iniciou em {_MINUTOS_MAX_PENDENTE} minutos (o GitHub Actions "
             "não alocou uma máquina). Exclua e envie a planilha novamente."
         )
-    if expirados:
+    limite_sinal = datetime.datetime.utcnow() - datetime.timedelta(minutes=_MINUTOS_MAX_SEM_SINAL)
+    parados = (
+        db.query(ConsultaJob)
+        .filter(ConsultaJob.status == "processando", ConsultaJob.ultimo_sinal < limite_sinal)
+        .all()
+    )
+    for job in parados:
+        job.status = "erro"
+        job.erro_mensagem = (
+            f"A consulta parou de responder há mais de {_MINUTOS_MAX_SEM_SINAL} minutos "
+            "(o processamento no GitHub Actions foi interrompido). Exclua e envie a planilha novamente."
+        )
+    if expirados or parados:
         db.commit()
 
 

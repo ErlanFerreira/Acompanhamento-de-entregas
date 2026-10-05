@@ -6,6 +6,7 @@ Variáveis de ambiente necessárias: DATABASE_URL, PORTAL_EMAIL, PORTAL_SENHA.
 Precisa de `playwright install chromium` antes de rodar.
 """
 
+import datetime
 import json
 import os
 import sys
@@ -54,6 +55,7 @@ def main(job_id: int):
             return
 
         job.status = "processando"
+        job.ultimo_sinal = datetime.datetime.utcnow()
         db.commit()
 
         itens = db.query(ConsultaItem).filter(ConsultaItem.job_id == job_id).all()
@@ -61,6 +63,7 @@ def main(job_id: int):
 
         def progresso(i, total):
             job.processados = i
+            job.ultimo_sinal = datetime.datetime.utcnow()
             db.commit()
             print(f"{i}/{total} NFs consultadas")
 

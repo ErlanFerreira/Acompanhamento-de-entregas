@@ -111,6 +111,10 @@ class ConsultaJob(Base):
     total_itens = Column(Integer, default=0)
     processados = Column(Integer, default=0)
     erro_mensagem = Column(String(500), nullable=True)
+    # Último sinal de vida do run_consulta.py (UTC) -- atualizado a cada NF
+    # consultada. Se um job "processando" fica muito tempo sem sinal, o
+    # workflow foi cancelado/morreu sem avisar e a consulta é marcada como erro.
+    ultimo_sinal = Column(DateTime, nullable=True)
     # Bytes originais do .xlsx enviado -- guardados pra gerar o resultado
     # final preservando a formatação (cores, fontes, larguras) da planilha
     # que o parceiro mandou, em vez de criar uma planilha nova do zero.
