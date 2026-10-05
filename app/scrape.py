@@ -87,7 +87,14 @@ def _login(page: Page) -> None:
         if "/login" not in page.url:
             break
         page.wait_for_timeout(1500)
-        page.fill('input[name="login"]', config.PORTAL_EMAIL)
+        try:
+            page.fill('input[name="login"]', config.PORTAL_EMAIL, timeout=10_000)
+        except PlaywrightTimeoutError:
+            # A SPA às vezes passa pela tela de login e redireciona sozinha
+            # pro menu/home enquanto a gente espera o campo -- reavalia a URL
+            # em vez de estourar o timeout de 30s.
+            page.wait_for_load_state("networkidle")
+            continue
         page.fill('input[name="senha"]', config.PORTAL_SENHA)
         page.click("button.button-login")
         page.wait_for_timeout(3000)
