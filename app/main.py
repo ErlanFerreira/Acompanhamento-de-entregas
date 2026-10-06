@@ -29,11 +29,8 @@ from .security import (
     VIA_SENHA,
     create_share_token,
     is_authenticated,
-    require_acesso_completo_api,
-    require_acesso_completo_page,
     require_auth_api,
     require_auth_page,
-    tem_acesso_completo,
     verify_share_token,
 )
 from .seed import init_db_and_seed
@@ -53,9 +50,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-# Usado no menu (base.html) pra esconder as telas restritas de quem entrou
-# pelo link de acesso.
-templates.env.globals["tem_acesso_completo"] = tem_acesso_completo
 
 
 @app.exception_handler(HTTPException)
@@ -217,7 +211,7 @@ def api_sync_run():
 
 # ------------------------------------------------------------ bipagem -----
 
-@app.get("/bipagem", response_class=HTMLResponse, dependencies=[Depends(require_acesso_completo_page)])
+@app.get("/bipagem", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 def bipagem_page(request: Request):
     return templates.TemplateResponse("bipagem.html", {"request": request, "active": "bipagem"})
 
@@ -248,7 +242,7 @@ def _resultado_bipagem(db: Session, leitura: str) -> dict:
     return resultado
 
 
-@app.post("/api/bipagem", dependencies=[Depends(require_acesso_completo_api)])
+@app.post("/api/bipagem", dependencies=[Depends(require_auth_api)])
 def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
     """Registra um bip -- o mesmo bip vale pro controle de comprovantes e
     pro protocolo de faturas. Repetir a mesma chave não cria outro registro:
@@ -279,7 +273,7 @@ def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
     return resultado
 
 
-@app.delete("/api/bipagem", dependencies=[Depends(require_acesso_completo_api)])
+@app.delete("/api/bipagem", dependencies=[Depends(require_auth_api)])
 def api_bipagem_remover(chave: str, db: Session = Depends(get_db)):
     """Desfaz um bip (ex: bipado por engano) -- no controle de comprovantes
     o CT-e volta a ficar sem data de envio. Não desfaz bip que já entrou num
@@ -307,12 +301,12 @@ def _xlsx_response(conteudo: bytes, nome: str) -> StreamingResponse:
     )
 
 
-@app.get("/api/bipagem/tomadores", dependencies=[Depends(require_acesso_completo_api)])
+@app.get("/api/bipagem/tomadores", dependencies=[Depends(require_auth_api)])
 def api_bipagem_tomadores(db: Session = Depends(get_db)):
     return {"tomadores": relatorios_bipagem.tomadores_disponiveis(db)}
 
 
-@app.get("/api/bipagem/controle", dependencies=[Depends(require_acesso_completo_api)])
+@app.get("/api/bipagem/controle", dependencies=[Depends(require_auth_api)])
 def api_bipagem_controle(tomador: str, mes: str, responsavel: str = "", db: Session = Depends(get_db)):
     """Controle mensal de comprovantes (modelo "SETEMBRO - GUANABARA") --
     `tomador` é a raiz (8 dígitos) do CNPJ ou "nome:<nome>" (ver
@@ -343,13 +337,13 @@ def _protocolo_to_dict(p: ProtocoloFatura) -> dict:
     }
 
 
-@app.get("/api/bipagem/faturas/pendentes", dependencies=[Depends(require_acesso_completo_api)])
+@app.get("/api/bipagem/faturas/pendentes", dependencies=[Depends(require_auth_api)])
 def api_faturas_pendentes(db: Session = Depends(get_db)):
     """CT-e bipados que ainda não entraram em nenhum protocolo de faturas."""
     return {"pendentes": relatorios_bipagem.faturas_pendentes(db)}
 
 
-@app.post("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_acesso_completo_api)])
+@app.post("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_auth_api)])
 def api_faturas_gerar_protocolo(payload: dict, db: Session = Depends(get_db)):
     """Gera o protocolo de envio de faturas (modelo "ENVIO DE COMPROVANTE -
     PETROCARGAS") com os CT-e pendentes do tomador e dá baixa neles -- o
@@ -363,13 +357,13 @@ def api_faturas_gerar_protocolo(payload: dict, db: Session = Depends(get_db)):
     return {**_protocolo_to_dict(protocolo), "chaves": chaves}
 
 
-@app.get("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_acesso_completo_api)])
+@app.get("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_auth_api)])
 def api_faturas_protocolos(db: Session = Depends(get_db)):
     protocolos = db.query(ProtocoloFatura).order_by(ProtocoloFatura.criado_em.desc()).limit(50).all()
     return {"protocolos": [_protocolo_to_dict(p) for p in protocolos]}
 
 
-@app.get("/api/bipagem/faturas/protocolos/{protocolo_id}/arquivo", dependencies=[Depends(require_acesso_completo_api)])
+@app.get("/api/bipagem/faturas/protocolos/{protocolo_id}/arquivo", dependencies=[Depends(require_auth_api)])
 def api_faturas_protocolo_arquivo(protocolo_id: int, db: Session = Depends(get_db)):
     p = db.query(ProtocoloFatura).filter(ProtocoloFatura.id == protocolo_id).first()
     if not p or not p.arquivo:
@@ -382,7 +376,7 @@ def api_faturas_protocolo_arquivo(protocolo_id: int, db: Session = Depends(get_d
     return _xlsx_response(arquivo, f"protocolo_faturas_{p.id}_{nome}_{data}.xlsx")
 
 
-@app.delete("/api/bipagem/faturas/protocolos/{protocolo_id}", dependencies=[Depends(require_acesso_completo_api)])
+@app.delete("/api/bipagem/faturas/protocolos/{protocolo_id}", dependencies=[Depends(require_auth_api)])
 def api_faturas_desfazer_protocolo(protocolo_id: int, db: Session = Depends(get_db)):
     """Desfaz um protocolo gerado por engano -- os CT-e dele voltam a ficar
     pendentes de protocolo."""
@@ -409,7 +403,7 @@ _COLUNAS_BIPAGEM = [
 ]
 
 
-@app.post("/api/bipagem/exportar", dependencies=[Depends(require_acesso_completo_api)])
+@app.post("/api/bipagem/exportar", dependencies=[Depends(require_auth_api)])
 def api_bipagem_exportar(payload: dict, db: Session = Depends(get_db)):
     leituras = [str(x) for x in (payload.get("leituras") or [])][:2000]
     wb = openpyxl.Workbook()
