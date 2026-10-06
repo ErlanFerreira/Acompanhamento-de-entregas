@@ -1,0 +1,22 @@
+name: Manter painel acordado
+
+# O plano gratuito da Render coloca o app pra dormir após 15 min sem acesso
+# (o primeiro acesso depois disso leva ~40s). Este ping a cada 10 min no
+# horário comercial evita isso; fora dele o app pode dormir à vontade
+# (economiza as 750h/mês do plano gratuito).
+#
+# Requer a variável de repositório APP_URL (Settings > Secrets and variables >
+# Actions > Variables), ex.: https://acompanhamento-de-entregas.onrender.com
+
+on:
+  schedule:
+    # UTC -- 07:00 a 18:50 no horário de Brasília (UTC-3), segunda a sexta.
+    - cron: "*/10 10-21 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: ${{ vars.APP_URL != '' }}
+    steps:
+      - run: curl -fsS --max-time 90 --retry 2 --retry-delay 10 -o /dev/null "${{ vars.APP_URL }}/login"

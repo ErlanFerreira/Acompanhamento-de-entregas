@@ -1,0 +1,31 @@
+# Blueprint da Render (https://render.com) -- hospedagem gratuita do painel web.
+# A sincronização/consulta continuam rodando no GitHub Actions e o banco na Neon;
+# aqui só sobe o app FastAPI como um processo comum (uvicorn).
+services:
+  - type: web
+    name: acompanhamento-de-entregas
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /login
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      # Valores secretos: preencher no painel da Render (não ficam no repositório).
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: PAINEL_SENHA
+        sync: false
+      - key: PORTAL_EMAIL
+        sync: false
+      - key: PORTAL_SENHA
+        sync: false
+      - key: GITHUB_REPO
+        sync: false
+      - key: GITHUB_DISPATCH_TOKEN
+        sync: false
