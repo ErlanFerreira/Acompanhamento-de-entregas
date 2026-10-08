@@ -15,9 +15,10 @@ COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 dias
 
 
 # Por onde a sessão foi aberta: "senha" (login normal) ou "link" (link de
-# acesso compartilhado). Hoje as duas têm o mesmo acesso; fica registrado
-# pra poder restringir alguma tela a quem entra com a senha, se precisar
-# (sessões antigas, de antes desse campo, não têm "via").
+# acesso compartilhado). Quem entra pelo link não vê as telas restritas
+# (ver `require_acesso_completo_page` -- hoje só a de Comprovantes).
+# Sessões antigas, de antes desse campo, não têm "via" -- são tratadas como
+# link (restritas) até a pessoa entrar de novo com a senha.
 VIA_SENHA = "senha"
 VIA_LINK = "link"
 
@@ -55,6 +56,12 @@ def is_authenticated(request: Request) -> bool:
     return _sessao(request) is not None
 
 
+def tem_acesso_completo(request: Request) -> bool:
+    """Logado com a senha (não pelo link de acesso compartilhado)."""
+    sessao = _sessao(request)
+    return bool(sessao) and sessao.get("via") == VIA_SENHA
+
+
 def require_auth_page(request: Request):
     """Para rotas HTML: redireciona para /login se não autenticado."""
     if not is_authenticated(request):
@@ -66,3 +73,10 @@ def require_auth_api(request: Request):
     if not is_authenticated(request):
         raise HTTPException(status_code=401, detail="Não autenticado.")
 
+
+def require_acesso_completo_page(request: Request):
+    """Telas restritas a quem entrou com a senha -- quem veio pelo link de
+    acesso volta pro painel, como se a tela não existisse."""
+    require_auth_page(request)
+    if not tem_acesso_completo(request):
+        raise HTTPException(status_code=303, headers={"Location": "/painel"})

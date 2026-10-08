@@ -13,6 +13,9 @@
     <div class="sidebar-brand">Transrota</div>
     <nav>
       <a href="/painel" class="nav-link {{ 'active' if active == 'painel' else '' }}">Painel</a>
+      {% if tem_acesso_completo(request) %}
+      <a href="/comprovantes" class="nav-link {{ 'active' if active == 'comprovantes' else '' }}">Comprovantes</a>
+      {% endif %}
       <a href="/consultas" class="nav-link {{ 'active' if active == 'consultas' else '' }}">Consulta de Notas</a>
       <a href="/bipagem" class="nav-link {{ 'active' if active == 'bipagem' else '' }}">Emissão de Protocolo</a>
     </nav>

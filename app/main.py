@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem
+from .prazo_comprovante import prazo_comprovante
 from .db import get_db
 from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura
 from .security import (
@@ -29,8 +30,10 @@ from .security import (
     VIA_SENHA,
     create_share_token,
     is_authenticated,
+    require_acesso_completo_page,
     require_auth_api,
     require_auth_page,
+    tem_acesso_completo,
     verify_share_token,
 )
 from .seed import init_db_and_seed
@@ -50,6 +53,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+# Usado no menu (base.html) pra esconder as telas restritas de quem entrou
+# pelo link de acesso.
+templates.env.globals["tem_acesso_completo"] = tem_acesso_completo
 
 
 @app.exception_handler(HTTPException)
@@ -121,7 +127,18 @@ def painel_page(request: Request):
     return templates.TemplateResponse("painel.html", {"request": request, "active": "painel"})
 
 
+@app.get("/comprovantes", response_class=HTMLResponse, dependencies=[Depends(require_acesso_completo_page)])
+def comprovantes_page(request: Request):
+    """Quantos CT-e têm comprovante de entrega no GW (coluna "Data
+    Comprovante" do relatório) e quantos ainda faltam -- usa os mesmos dados
+    de /api/cargas, a conta é feita no navegador (static/comprovantes.js).
+    Só pra quem entrou com a senha (não aparece pra quem veio pelo link de
+    acesso)."""
+    return templates.TemplateResponse("comprovantes.html", {"request": request, "active": "comprovantes"})
+
+
 def _row_to_dict(r: Carga) -> dict:
+    prazo_dias, distancia_km = prazo_comprovante(r.cidade_dest, r.uf_dest)
     return {
         "emissao": r.emissao,
         "cte": r.cte,
@@ -141,6 +158,12 @@ def _row_to_dict(r: Carga) -> dict:
         "estado": r.estado,
         "previsao": r.previsao,
         "dias_atraso": r.dias_atraso,
+        "serie": r.serie,
+        "filial": r.filial,
+        "cnpj_filial": r.cnpj_filial,
+        "notas_fiscais": r.notas_fiscais,
+        "prazo_comprovante_dias": prazo_dias,
+        "distancia_km": distancia_km,
     }
 
 

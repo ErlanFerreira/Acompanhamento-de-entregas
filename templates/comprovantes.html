@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Comprovantes — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+
+  <header class="app-header">
+    <div>
+      <h1>Comprovantes de Entrega</h1>
+      <p id="header-sub">Carregando…</p>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+  </header>
+
+  <section class="filters" id="filters">
+    <div class="filter-group">
+      <span class="filter-label">Emissão CT-e</span>
+      <select id="f-date-preset">
+        <option value="all" selected>Todo o período</option>
+        <option value="7">Últimos 7 dias</option>
+        <option value="14">Últimos 14 dias</option>
+        <option value="30">Últimos 30 dias</option>
+        <option value="60">Últimos 60 dias</option>
+        <option value="custom">Personalizado…</option>
+      </select>
+      <input type="date" id="f-date-from" style="display:none">
+      <span id="f-date-sep" style="display:none; color: var(--text-muted); font-size:12px;">até</span>
+      <input type="date" id="f-date-to" style="display:none">
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Tomador</span>
+      <select id="f-tomador" class="comp-select-largo"><option value="all">Todos</option></select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Filial</span>
+      <select id="f-filial"><option value="all">Todas</option></select>
+    </div>
+    <div class="filter-group" id="f-situacao">
+      <span class="filter-label">Situação</span>
+      <button class="chip active" data-state="good" data-sit="com" type="button"><span class="dot-swatch" style="background:var(--status-good)"></span>Com comprovante</button>
+      <button class="chip active" data-state="entregue" data-sit="falta_entregue" type="button"><span class="dot-swatch" style="background:var(--series-1)"></span>Entregue sem comprovante</button>
+      <button class="chip active" data-state="pendente" data-sit="falta_pendente" type="button"><span class="dot-swatch" style="background:var(--text-muted)"></span>Ainda não entregue</button>
+    </div>
+    <div class="filter-group" style="flex:1; min-width:200px;">
+      <input type="text" id="f-search" placeholder="Buscar CT-e, NF ou empresa…">
+    </div>
+    <span class="reset-link" id="f-reset">Limpar filtros</span>
+  </section>
+
+  <!-- Visão geral (padrão). Clicar num nível do quadro de prazo troca pra
+       a tela "#prazo/<nível>" logo abaixo, com os CT-e daquele nível. -->
+  <div id="vista-geral">
+  <section class="kpis" id="kpis"></section>
+
+  <section class="comp-strip" id="comp-strip">
+    <div id="chart-composicao"></div>
+    <div class="legend" id="legend-composicao"></div>
+  </section>
+
+  <section class="table-section comp-prazo-section">
+    <div class="table-toolbar">
+      <div>
+        <h2>Prazo do comprovante</h2>
+        <div class="chart-subtitle" style="margin:2px 0 0;">Entregues sem comprovante · prazo em dias úteis a partir da entrega, pela distância de Carpina: até 50 km 2 dias · até 100 km 4 dias · até 200 km 6 dias · acima 10 dias. Clique num nível para ver os CT-e e notas fiscais.</div>
+      </div>
+    </div>
+    <div class="comp-prazo-tiles" id="prazo-tiles"></div>
+    <div class="chart-subtitle" id="prazo-nota" style="margin:8px 0 0;"></div>
+  </section>
+
+  <section class="table-section comp-clientes">
+    <div class="table-toolbar">
+      <div>
+        <h2>Comprovantes por cliente</h2>
+        <div class="chart-subtitle" style="margin:2px 0 0;">Recebidos e faltando por tomador do serviço · clique num cliente para ver os CT-e e notas fiscais sem comprovante</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="text" id="c-search" placeholder="Filtrar cliente…">
+        <button class="btn" id="c-export">Baixar CSV</button>
+      </div>
+    </div>
+    <div class="table-scroll comp-clientes-scroll">
+      <table class="detail comp-clientes-table" id="clientes-table">
+        <thead>
+          <tr>
+            <th data-key="nome">Cliente</th>
+            <th data-key="total" class="num">CT-e</th>
+            <th data-key="com" class="num">Recebidos</th>
+            <th data-key="falta" class="num">Faltando</th>
+            <th data-key="gravidade">Prazo</th>
+            <th data-key="pct" class="comp-col-barra">% recebido</th>
+          </tr>
+        </thead>
+        <tbody id="clientes-body"></tbody>
+      </table>
+    </div>
+    <div class="legend" id="legend-clientes"></div>
+  </section>
+
+  <section class="grid-2" style="margin-top:14px;">
+    <figure class="chart-card">
+      <div class="chart-title">Comprovantes por data de emissão</div>
+      <div class="chart-subtitle" id="trend-subtitle">CT-e emitidos por dia, pela situação do comprovante</div>
+      <div id="chart-trend"></div>
+      <div class="legend" id="legend-trend"></div>
+    </figure>
+    <figure class="chart-card">
+      <div class="chart-title">Comprovantes por filial</div>
+      <div class="chart-subtitle">Percentual de CT-e com comprovante em cada filial</div>
+      <div id="chart-filiais"></div>
+    </figure>
+  </section>
+
+  <section class="table-section">
+    <div class="table-toolbar">
+      <h2>CT-e</h2>
+      <span class="count" id="table-count"></span>
+      <div style="flex:1"></div>
+      <button class="btn" id="t-export">Baixar CSV</button>
+    </div>
+    <div class="table-scroll">
+      <table class="detail" id="detail-table">
+        <thead>
+          <tr>
+            <th data-key="cte">CT-e</th>
+            <th data-key="filial_nome">Filial</th>
+            <th data-key="emissao">Emissão</th>
+            <th data-key="consignatario">Tomador</th>
+            <th data-key="destinatario">Destinatário</th>
+            <th data-key="cidade_dest">Cidade / UF</th>
+            <th data-key="notas_fiscais">NF</th>
+            <th data-key="data_baixa">Entrega</th>
+            <th data-key="data_comprovante">Comprovante</th>
+            <th data-key="alerta_rank">Prazo</th>
+            <th data-key="situacao">Situação</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="pagination"></div>
+  </section>
+
+  </div>
+
+  <div id="vista-prazo" hidden>
+    <section class="table-section comp-vista-prazo">
+      <div class="table-toolbar">
+        <a href="#" class="btn" id="vp-voltar">← Voltar</a>
+        <div>
+          <h2 id="vp-titulo"></h2>
+          <div class="chart-subtitle" id="vp-sub" style="margin:2px 0 0;"></div>
+        </div>
+        <div style="flex:1"></div>
+        <input type="text" id="vp-search" placeholder="Filtrar cliente, CT-e ou NF…">
+        <button class="btn" id="vp-export" type="button">Baixar CSV</button>
+      </div>
+      <div class="comp-vp-abas" id="vp-abas"></div>
+      <div id="vp-lista"></div>
+    </section>
+  </div>
+
+  <footer class="app-footer">
+    <strong>Como é contado</strong> — "Com comprovante" é o CT-e com a coluna "Data Comprovante" preenchida no relatório "Pendências" do GW. Os sem comprovante se dividem em <strong>entregues</strong> (já têm baixa/entrega, mas o comprovante não foi lançado — são os que realmente faltam cobrar) e <strong>ainda não entregues</strong> (a carga não chegou, então o comprovante ainda não existe). O <strong>prazo do comprovante</strong> conta em dias úteis (sem sábados, domingos e feriados nacionais, incluindo Carnaval) a partir da data de entrega, conforme a distância em linha reta de Carpina até a cidade de destino; cidades acima de 200 km ou não localizadas ficam com 10 dias. <strong>No prazo</strong>: falta mais de 1 dia útil · <strong>Alerta</strong>: vence hoje ou no próximo dia útil · <strong>Vencido</strong>: até 5 dias úteis de atraso · <strong>Crítico</strong>: mais de 5 dias úteis. Cobre só os CT-e da janela sincronizada (últimos 90 dias de emissão).
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/comprovantes.js"></script>
+{% endblock %}
