@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import unicodedata
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 from copy import copy
 
@@ -711,6 +712,22 @@ def _clonar_estilo_linha(ws, linha_origem: int, linha_destino: int, num_colunas:
         ws.row_dimensions[linha_destino].height = ws.row_dimensions[linha_origem].height
 
 
+def _nome_arquivo_resultado(job: ConsultaJob) -> str:
+    """Nome do arquivo baixado: o mesmo da planilha enviada + "_resultado"
+    (ex: planilha1.xlsx -> planilha1_resultado.xlsx)."""
+    base = re.split(r"[\/\\]", job.nome_arquivo or "")[-1]
+    base = re.sub(r"\.xlsx$", "", base, flags=re.IGNORECASE)
+    base = re.sub(r'[\x00-\x1f"]', "", base).strip()
+    return f"{base or f'consulta_{job.id}'}_resultado.xlsx"
+
+
+def _content_disposition(nome: str) -> str:
+    """Cabeçalho de download aceitando acentos no nome (RFC 5987), com um
+    fallback ASCII para clientes antigos."""
+    ascii_nome = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode("ascii") or "resultado.xlsx"
+    return f"attachment; filename=\"{ascii_nome}\"; filename*=UTF-8''{quote(nome)}"
+
+
 @app.get("/api/consultas/{job_id}/arquivo", dependencies=[Depends(require_auth_api)])
 def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
     job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
@@ -785,9 +802,9 @@ def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
     wb.save(buffer)
     buffer.seek(0)
 
-    nome_saida = f"consulta_{job_id}_resultado.xlsx"
+    nome_saida = _nome_arquivo_resultado(job)
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{nome_saida}"'},
+        headers={"Content-Disposition": _content_disposition(nome_saida)},
     )
