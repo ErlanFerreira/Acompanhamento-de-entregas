@@ -316,31 +316,6 @@ tr.bip-row-warn td { background: color-mix(in srgb, var(--status-warning) 8%, tr
 .comp-de { color: var(--text-muted); font-weight: 400; }
 .comp-select-largo { max-width: 280px; }
 
-.comp-clientes { margin-bottom: 14px; }
-.comp-clientes .chart-subtitle { font-size: 11.5px; color: var(--text-muted); }
-.comp-clientes-scroll { max-height: 560px; }
-table.comp-clientes-table td { padding: 10px; vertical-align: middle; }
-table.comp-clientes-table th.num, table.comp-clientes-table td.num { text-align: right; }
-.comp-cliente-nome { font-weight: 600; max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.comp-n { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.comp-recebidos::before, .comp-faltando::before {
-  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 2px;
-}
-.comp-recebidos::before { background: var(--status-good); }
-.comp-faltando::before { background: var(--series-1); }
-.comp-zero { color: var(--text-muted); }
-.comp-detalhe { font-size: 11px; font-weight: 400; color: var(--text-muted); margin-top: 2px; }
-.comp-col-barra { width: 34%; min-width: 200px; }
-.comp-barra-wrap { display: flex; align-items: center; gap: 10px; }
-.comp-barra { flex: 1; display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; background: var(--gridline); }
-.comp-barra > div { height: 100%; }
-.comp-pct { font-weight: 650; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
-tr.comp-cliente-row { cursor: pointer; }
-tr.comp-cliente-row:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
-tr.comp-cliente-row.selecionado td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
-tr.comp-cliente-row.selecionado td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
-.comp-seta { display: inline-block; width: 14px; color: var(--text-muted); }
-tr.comp-pend-row > td { padding: 0 10px 14px 24px; background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .comp-pend { border-left: 3px solid var(--accent); padding: 10px 0 0 12px; }
 .comp-pend-head { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 13px; margin-bottom: 8px; }
 .comp-pend-scroll { max-height: 320px; overflow: auto; border: 1px solid var(--gridline); border-radius: 8px; background: var(--surface-1); }
@@ -348,34 +323,25 @@ table.comp-pend-table th { cursor: default; }
 table.comp-pend-table td { padding: 6px 8px; }
 .comp-pend-nf { font-variant-numeric: tabular-nums; white-space: normal; max-width: 220px; }
 .chip[data-state="entregue"].active { background: var(--series-1); }
-.chip[data-state="pendente"].active { background: var(--text-muted); }
+.chip[data-state="pendente"].active { background: var(--series-2); }
 
 /* prazo do comprovante (No prazo / Alerta / Vencido / Crítico) */
 .comp-prazo-section { margin-bottom: 14px; }
 .comp-prazo-section .chart-subtitle { font-size: 11.5px; color: var(--text-muted); }
 .comp-prazo-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-.comp-prazo-tile {
+.comp-prazo-tile, .comp-card {
   font: inherit; text-align: left; cursor: pointer; color: var(--text-primary);
   background: color-mix(in srgb, var(--cor) 8%, var(--surface-1)); border: 1px solid var(--border);
   border-left: 5px solid var(--cor); border-radius: 10px; padding: 12px 14px;
 }
 .comp-prazo-tile:hover { background: color-mix(in srgb, var(--cor) 16%, var(--surface-1)); }
-.comp-prazo-tile.ativo { box-shadow: 0 0 0 2px var(--cor); }
-.comp-prazo-tile .label { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 7px; }
-.comp-prazo-tile .label .d { width: 10px; height: 10px; border-radius: 50%; background: var(--cor); }
-.comp-prazo-tile .value { font-size: 28px; font-weight: 700; line-height: 1.15; margin-top: 4px; font-variant-numeric: tabular-nums; }
-.comp-prazo-tile .sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+.comp-prazo-tile .label, .comp-card .label { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 7px; }
+.comp-prazo-tile .label .d, .comp-card .label .d { width: 10px; height: 10px; border-radius: 50%; background: var(--cor); }
+.comp-prazo-tile .value, .comp-card .value { font-size: 28px; font-weight: 700; line-height: 1.15; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.comp-prazo-tile .sub, .comp-card .sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
 .comp-prazo { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .comp-prazo-txt { font-size: 11px; color: var(--text-muted); }
-.comp-badges { display: flex; flex-wrap: nowrap; gap: 4px; }
-.comp-badge {
-  display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 650; white-space: nowrap;
-  padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--cor) 18%, transparent); color: var(--text-primary);
-}
-.comp-badge .d { width: 7px; height: 7px; border-radius: 50%; background: var(--cor); }
-.comp-badge-txt { display: none; }
 @media (max-width: 780px) { .comp-prazo-tiles { grid-template-columns: repeat(2, 1fr); } }
-.comp-legend-sep { margin-left: 10px; color: var(--text-muted); }
 
 /* tela de um nível do prazo (#prazo/<nível>) */
 .comp-vista-prazo .table-toolbar h2 { font-size: 17px; display: flex; align-items: center; gap: 8px; }
@@ -391,5 +357,23 @@ a.btn { text-decoration: none; }
 .comp-vp-aba strong { color: var(--text-primary); }
 .comp-vp-aba:hover { background: color-mix(in srgb, var(--cor) 12%, transparent); }
 .comp-vp-aba.ativa { background: color-mix(in srgb, var(--cor) 20%, transparent); border-color: var(--cor); color: var(--text-primary); }
-.comp-vp-grupo { margin-bottom: 16px; }
+.comp-vp-grupo { margin-bottom: 8px; padding: 0 0 0 12px; border-radius: 0 8px 8px 0; background: color-mix(in srgb, var(--surface-1) 60%, var(--page-plane)); }
+.comp-vp-grupo > summary { list-style: none; cursor: pointer; padding: 10px 12px 10px 0; margin: 0; gap: 10px; }
+.comp-vp-grupo > summary::-webkit-details-marker { display: none; }
+.comp-vp-grupo > summary:hover strong { text-decoration: underline; text-underline-offset: 2px; }
+.comp-vp-grupo[open] { padding-bottom: 12px; }
+.comp-vp-grupo[open] .comp-vp-seta { transform: rotate(90deg); }
+.comp-vp-seta { display: inline-block; width: 12px; color: var(--text-muted); transition: transform .12s; }
+.comp-vp-qtd { font-size: 12px; font-weight: 650; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--cor) 20%, transparent); }
+.comp-vp-corpo { padding-right: 12px; }
+.comp-vp-acoes { display: flex; gap: 14px; justify-content: flex-end; margin: -4px 0 10px; }
 .comp-vp-scroll { max-height: none; }
+
+/* cards de totais (mesmo visual dos de prazo, sem clique) */
+.comp-card { cursor: default; position: relative; }
+.comp-card.misto { border-left-color: transparent; }
+.comp-card.misto::before {
+  content: ""; position: absolute; left: -5px; top: -1px; bottom: -1px; width: 5px; border-radius: 10px 0 0 10px;
+  background: linear-gradient(var(--series-1), var(--series-2));
+}
+.comp-card.misto .label .d { background: linear-gradient(135deg, var(--series-1) 50%, var(--series-2) 50%); }

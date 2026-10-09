@@ -5,12 +5,12 @@
   // Comprovante"; sem ela, separa o que já foi entregue (falta de verdade)
   // do que ainda nem chegou (o comprovante ainda não existe).
   // Verde/amarelo/vermelho/roxo ficam reservados pro alerta de prazo -- a
-  // situação usa verde (recebido), azul e cinza.
+  // situação usa verde (recebido), azul e laranja.
   const ORDEM = ["com", "falta_entregue", "falta_pendente"];
   const COR = {
     com: "var(--status-good)",
     falta_entregue: "var(--series-1)",
-    falta_pendente: "var(--text-muted)"
+    falta_pendente: "var(--series-2)"
   };
   const ROTULO = {
     com: "Com comprovante",
@@ -228,10 +228,7 @@
       tomador: "all",
       filial: "all",
       situacoes: new Set(TODAS),
-      search: "",
-      sortKey: "emissao",
-      sortDir: "desc",
-      page: 1
+      search: ""
     };
 
     const datePresetEl = document.getElementById("f-date-preset");
@@ -274,7 +271,6 @@
       document.querySelectorAll("#f-situacao .chip").forEach(c => c.classList.add("active"));
       render();
     });
-    document.getElementById("t-export").addEventListener("click", exportCsv);
 
     function inDateRange(iso) {
       if (state.datePreset === "all") return true;
@@ -291,12 +287,12 @@
     }
 
     // Filtros de "recorte" (período, tomador, filial, busca) valem pra tudo;
-    // os chips de situação só escolhem o que aparece na tabela e nos
-    // gráficos -- os totais dos KPIs continuam mostrando o quadro inteiro.
-    function getRecorte(ignorarTomador) {
+    // os chips de situação só escolhem o que aparece nos gráficos -- os
+    // totais continuam mostrando o quadro inteiro.
+    function getRecorte() {
       const q = state.search;
       return records.filter(r => {
-        if (!ignorarTomador && state.tomador !== "all" && r.consignatario !== state.tomador) return false;
+        if (state.tomador !== "all" && r.consignatario !== state.tomador) return false;
         if (state.filial !== "all" && r.filial_nome !== state.filial) return false;
         if (!inDateRange(r.emissao)) return false;
         if (q && !(
@@ -315,15 +311,19 @@
       const c = contar(rows);
       const faltam = c.falta_entregue + c.falta_pendente;
       const entregues = c.com + c.falta_entregue;
+      // Mesmo visual dos cards de prazo, nas cores da situação; "Faltam" é a
+      // soma de entregues (azul) + não entregues (laranja), daí a faixa mista.
       const tiles = [
-        { label: "Total de CT-e", value: fmtN(total), sub: "de " + fmtN(meta.total) + " sincronizados", cls: "" },
-        { label: "Com comprovante", value: fmtN(c.com), sub: total ? fmtPct(c.com / total) + " do total" : "—", cls: "good" },
-        { label: "Faltam comprovante", value: fmtN(faltam), sub: total ? fmtPct(faltam / total) + " do total" : "—", cls: "" },
-        { label: "Entregues sem comprovante", value: fmtN(c.falta_entregue), sub: entregues ? fmtPct(c.falta_entregue / entregues) + " das entregues · cobrar" : "—", cls: "" },
-        { label: "Ainda não entregues", value: fmtN(c.falta_pendente), sub: faltam ? fmtPct(c.falta_pendente / faltam) + " dos que faltam" : "—", cls: "" }
+        { label: "Total de CT-e", value: fmtN(total), sub: "de " + fmtN(meta.total) + " sincronizados", cor: "var(--text-muted)" },
+        { label: "Com comprovante", value: fmtN(c.com), sub: total ? fmtPct(c.com / total) + " do total" : "—", cor: COR.com },
+        { label: "Faltam comprovante", value: fmtN(faltam), sub: total ? fmtPct(faltam / total) + " do total" : "—", cor: COR.falta_entregue, misto: true },
+        { label: "Entregues sem comprovante", value: fmtN(c.falta_entregue), sub: entregues ? fmtPct(c.falta_entregue / entregues) + " das entregues · cobrar" : "—", cor: COR.falta_entregue },
+        { label: "Ainda não entregues", value: fmtN(c.falta_pendente), sub: faltam ? fmtPct(c.falta_pendente / faltam) + " dos que faltam" : "—", cor: COR.falta_pendente }
       ];
       document.getElementById("kpis").innerHTML = tiles.map(t =>
-        '<div class="stat-tile ' + t.cls + '"><div class="label">' + esc(t.label) + '</div><div class="value">' + t.value + '</div><div class="sub">' + esc(t.sub) + '</div></div>'
+        '<div class="comp-card' + (t.misto ? " misto" : "") + '" style="--cor:' + t.cor + '">' +
+        '<div class="label"><span class="d"></span>' + esc(t.label) + '</div>' +
+        '<div class="value">' + t.value + '</div><div class="sub">' + esc(t.sub) + '</div></div>'
       ).join("");
     }
 
@@ -488,180 +488,6 @@
       ).join("");
     }
 
-    // Tabela "por cliente" -- ignora o filtro de tomador (senão sobraria
-    // uma linha só) e destaca o cliente selecionado; clicar numa linha
-    // filtra a página inteira por ele, clicar de novo limpa.
-    let clienteBusca = "";
-    let clienteSort = { key: "falta", dir: "desc" };
-    let clientesAtuais = [];
-    let pendentesAbertos = [];
-
-    function badgesPrazo(a) {
-      const partes = ["critico", "vencido", "alerta", "no_prazo"].filter(k => a[k]).map(k =>
-        '<span class="comp-badge" style="--cor:' + COR_ALERTA[k] + '" title="' + fmtN(a[k]) + ' ' + esc(ROTULO_ALERTA[k].toLowerCase()) + '"><span class="d"></span>' +
-        fmtN(a[k]) + ' <span class="comp-badge-txt">' + esc(ROTULO_ALERTA[k].toLowerCase()) + '</span></span>');
-      return partes.length ? '<div class="comp-badges">' + partes.join("") + '</div>' : '<span class="comp-zero">—</span>';
-    }
-
-    function resumoClientes() {
-      const porCliente = new Map();
-      getRecorte(true).forEach(r => {
-        if (!porCliente.has(r.consignatario)) {
-          porCliente.set(r.consignatario, { c: { com: 0, falta_entregue: 0, falta_pendente: 0 }, a: { no_prazo: 0, alerta: 0, vencido: 0, critico: 0 } });
-        }
-        const g = porCliente.get(r.consignatario);
-        g.c[r.situacao]++;
-        if (r.alerta) g.a[r.alerta]++;
-      });
-      return Array.from(porCliente.entries()).map(([nome, g]) => {
-        const c = g.c, a = g.a;
-        const total = c.com + c.falta_entregue + c.falta_pendente;
-        return {
-          nome, c, a, total, com: c.com, falta: total - c.com, pct: total ? c.com / total : 0,
-          // Ordenar pela coluna "Prazo": mais críticos, depois vencidos, depois em alerta.
-          gravidade: a.critico * 1e6 + a.vencido * 1e3 + a.alerta
-        };
-      });
-    }
-
-    // CT-e do cliente ainda sem comprovante -- os mais graves primeiro
-    // (crítico, vencido, alerta, no prazo), depois os sem alerta (não
-    // entregues); dentro de cada nível, os que venceram/vencem antes.
-    function pendentesDoCliente(nome) {
-      return getRecorte(true)
-        .filter(r => r.consignatario === nome && r.situacao !== "com")
-        .sort((a, b) =>
-          b.alerta_rank - a.alerta_rank ||
-          (a.situacao === "falta_entregue" ? 0 : 1) - (b.situacao === "falta_entregue" ? 0 : 1) ||
-          String(a.vencimento || a.emissao || "").localeCompare(String(b.vencimento || b.emissao || "")));
-    }
-
-    function htmlPendentes(nome) {
-      const pend = pendentesDoCliente(nome);
-      if (!pend.length) return '<div class="empty-state">Nenhum CT-e pendente de comprovante para este cliente.</div>';
-      const linhas = pend.map((r, i) => {
-        const cor = COR[r.situacao];
-        return '<tr>' +
-          '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
-          '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—") + '</td>' +
-          '<td>' + fmtDate(r.emissao) + '</td>' +
-          '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 30)) + '</td>' +
-          '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
-          '<td>' + fmtDate(r.data_baixa) + '</td>' +
-          '<td data-prazo="' + i + '">' + (r.alerta ? pillPrazo(r) :
-            '<span class="status-pill" style="background:color-mix(in srgb, ' + cor + ' 16%, transparent); color:var(--text-primary);"><span class="d" style="background:' + cor + '"></span>' +
-            esc(r.situacao === "falta_entregue" ? "Sem data de entrega" : CURTO[r.situacao]) + '</span>') + '</td>' +
-          '</tr>';
-      }).join("");
-      pendentesAbertos = pend;
-      return '<div class="comp-pend">' +
-        '<div class="comp-pend-head"><strong>' + fmtN(pend.length) + ' CT-e sem comprovante</strong>' +
-        '<span class="comp-de"> · conhecimentos e notas fiscais de ' + esc(nome) + '</span>' +
-        '<div style="flex:1"></div><button class="btn comp-pend-csv" type="button">Baixar CSV</button></div>' +
-        '<div class="comp-pend-scroll"><table class="detail comp-pend-table"><thead><tr>' +
-        '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Prazo do comprovante</th>' +
-        '</tr></thead><tbody>' + linhas + '</tbody></table></div></div>';
-    }
-
-    function exportarPendentes(nome) {
-      const lines = [["CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Situacao",
-        "Prazo (dias uteis)", "Vencimento", "Alerta", "Detalhe do prazo"].join(";")];
-      pendentesDoCliente(nome).forEach(r => {
-        lines.push([r.cte, r.serie || "", csvSafe(r.notas_fiscais || ""), r.emissao || "", csvSafe(r.destinatario),
-          csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "", ROTULO[r.situacao],
-          r.situacao === "falta_entregue" ? r.prazo_comprovante_dias : "", r.vencimento || "",
-          ROTULO_ALERTA[r.alerta] || "", csvSafe(textoPrazo(r))].join(";"));
-      });
-      const sufixo = nome.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
-      baixarCsv(lines, "pendentes_comprovante_" + sufixo + ".csv");
-    }
-
-    function renderClientes() {
-      const q = clienteBusca.trim().toLowerCase();
-      const key = clienteSort.key, dir = clienteSort.dir === "asc" ? 1 : -1;
-      const itens = resumoClientes()
-        .filter(d => !q || d.nome.toLowerCase().includes(q))
-        .sort((a, b) => {
-          if (key === "nome") return a.nome.localeCompare(b.nome, "pt-BR") * dir;
-          return (a[key] - b[key]) * dir || b.c.falta_entregue - a.c.falta_entregue || a.nome.localeCompare(b.nome, "pt-BR");
-        });
-      clientesAtuais = itens;
-
-      document.querySelectorAll("#clientes-table th").forEach(th => {
-        const a = th.querySelector(".arrow"); if (a) a.remove();
-        if (th.dataset.key === key) {
-          const span = document.createElement("span");
-          span.className = "arrow";
-          span.textContent = clienteSort.dir === "asc" ? "▲" : "▼";
-          th.appendChild(span);
-        }
-      });
-
-      const tbody = document.getElementById("clientes-body");
-      if (!itens.length) {
-        tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">Nenhum cliente para os filtros atuais.</div></td></tr>';
-      } else {
-        tbody.innerHTML = itens.map((d, i) => {
-          const barra = ORDEM.filter(o => d.c[o]).map(o =>
-            '<div style="width:' + (d.c[o] / d.total * 100).toFixed(2) + '%; background:' + COR[o] + '"></div>'
-          ).join("");
-          const detalhe = [];
-          if (d.c.falta_entregue) detalhe.push(fmtN(d.c.falta_entregue) + (d.c.falta_entregue > 1 ? " entregues" : " entregue"));
-          if (d.c.falta_pendente) detalhe.push(fmtN(d.c.falta_pendente) + (d.c.falta_pendente > 1 ? " não entregues" : " não entregue"));
-          const aberto = state.tomador === d.nome;
-          return '<tr class="comp-cliente-row' + (aberto ? " selecionado" : "") + '" data-i="' + i + '">' +
-            '<td class="comp-cliente-nome" title="' + esc(d.nome) + '"><span class="comp-seta">' + (aberto ? "▾" : "▸") + '</span>' + esc(d.nome) + '</td>' +
-            '<td class="num comp-n">' + fmtN(d.total) + '</td>' +
-            '<td class="num comp-n comp-recebidos">' + fmtN(d.com) + '</td>' +
-            '<td class="num comp-n ' + (d.falta ? "comp-faltando" : "comp-zero") + '">' + fmtN(d.falta) +
-              (detalhe.length ? '<div class="comp-detalhe">' + detalhe.join(" · ") + '</div>' : "") + '</td>' +
-            '<td>' + badgesPrazo(d.a) + '</td>' +
-            '<td class="comp-col-barra"><div class="comp-barra-wrap"><div class="comp-barra">' + barra + '</div>' +
-              '<span class="comp-pct">' + fmtPct(d.pct) + '</span></div></td>' +
-            '</tr>' +
-            (aberto ? '<tr class="comp-pend-row"><td colspan="6">' + htmlPendentes(d.nome) + '</td></tr>' : "");
-        }).join("");
-        const btnPend = tbody.querySelector(".comp-pend-csv");
-        if (btnPend) btnPend.addEventListener("click", () => exportarPendentes(state.tomador));
-        const pendTable = tbody.querySelector(".comp-pend-table");
-        if (pendTable) bindTooltipsPrazo(pendTable, pendentesAbertos);
-        tbody.querySelectorAll("tr.comp-cliente-row").forEach(tr => {
-          const d = itens[parseInt(tr.dataset.i, 10)];
-          bindTooltip(tr.querySelector(".comp-barra"), () => tooltipContagem(d.nome, d.c));
-          tr.addEventListener("click", () => {
-            state.tomador = state.tomador === d.nome ? "all" : d.nome;
-            tomadorEl.value = state.tomador;
-            render();
-          });
-        });
-      }
-      document.getElementById("legend-clientes").innerHTML = ORDEM.map(o =>
-        '<span class="legend-item"><span class="legend-swatch" style="background:' + COR[o] + '"></span>' + esc(ROTULO[o]) + '</span>'
-      ).join("") + '<span class="legend-item comp-legend-sep">Prazo:</span>' + ["critico", "vencido", "alerta", "no_prazo"].map(k =>
-        '<span class="legend-item"><span class="legend-swatch" style="background:' + COR_ALERTA[k] + '; border-radius:50%"></span>' + esc(ROTULO_ALERTA[k]) + '</span>'
-      ).join("");
-    }
-
-    document.getElementById("c-search").addEventListener("input", function () {
-      clienteBusca = this.value; renderClientes();
-    });
-    document.querySelectorAll("#clientes-table th").forEach(th => {
-      th.addEventListener("click", function () {
-        const key = this.dataset.key;
-        if (clienteSort.key === key) clienteSort.dir = clienteSort.dir === "asc" ? "desc" : "asc";
-        else clienteSort = { key, dir: key === "nome" ? "asc" : "desc" };
-        renderClientes();
-      });
-    });
-    document.getElementById("c-export").addEventListener("click", function () {
-      const lines = [["Cliente", "CT-e", "Recebidos", "Faltando", "Faltando - entregues", "Faltando - nao entregues", "% recebido"].join(";")];
-      clientesAtuais.forEach(d => {
-        lines.push([csvSafe(d.nome), d.total, d.com, d.falta, d.c.falta_entregue, d.c.falta_pendente,
-          (d.pct * 100).toFixed(1).replace(".", ",")].join(";"));
-      });
-      baixarCsv(lines, "comprovantes_por_cliente.csv");
-    });
-
     function renderFiliais(rows) {
       const el = document.getElementById("chart-filiais");
       el.innerHTML = "";
@@ -688,92 +514,6 @@
         });
     }
 
-    function renderTable(rows) {
-      let data = rows;
-      document.getElementById("table-count").textContent = fmtN(data.length) + " CT-e";
-      const key = state.sortKey, dir = state.sortDir === "asc" ? 1 : -1;
-      data = data.slice().sort((a, b) => {
-        let av = a[key], bv = b[key];
-        if (av == null) av = ""; if (bv == null) bv = "";
-        if (key === "cte") return ((parseInt(av, 10) || 0) - (parseInt(bv, 10) || 0)) * dir;
-        if (key === "alerta_rank") return (av - bv) * dir || String(a.vencimento || "").localeCompare(String(b.vencimento || ""));
-        return String(av).localeCompare(String(bv), "pt-BR") * dir;
-      });
-      document.querySelectorAll("#detail-table th").forEach(th => {
-        const a = th.querySelector(".arrow"); if (a) a.remove();
-        if (th.dataset.key === state.sortKey) {
-          const span = document.createElement("span");
-          span.className = "arrow";
-          span.textContent = state.sortDir === "asc" ? "▲" : "▼";
-          th.appendChild(span);
-        }
-      });
-
-      const perPage = 25;
-      const totalPages = Math.max(1, Math.ceil(data.length / perPage));
-      if (state.page > totalPages) state.page = totalPages;
-      const start = (state.page - 1) * perPage;
-      const pageRows = data.slice(start, start + perPage);
-
-      const tbody = document.getElementById("table-body");
-      if (!pageRows.length) {
-        tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state">Nenhum CT-e para os filtros atuais.</div></td></tr>';
-      } else {
-        tbody.innerHTML = pageRows.map((r, i) => {
-          const cor = COR[r.situacao];
-          const cte = esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "");
-          return '<tr>' +
-            '<td>' + cte + '</td>' +
-            '<td title="' + esc(r.filial_nome) + '">' + esc(truncate(r.filial_nome, 18)) + '</td>' +
-            '<td>' + fmtDate(r.emissao) + '</td>' +
-            '<td title="' + esc(r.consignatario) + '">' + esc(truncate(r.consignatario, 26)) + '</td>' +
-            '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 26)) + '</td>' +
-            '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
-            '<td title="' + esc(r.notas_fiscais || "") + '">' + esc(truncate(r.notas_fiscais || "—", 18)) + '</td>' +
-            '<td>' + fmtDate(r.data_baixa) + '</td>' +
-            '<td class="' + (r.data_comprovante ? "" : "flag-no") + '">' + (r.data_comprovante ? fmtDate(r.data_comprovante) : "Falta") + '</td>' +
-            '<td data-prazo="' + i + '">' + (pillPrazo(r) || '<span class="bip-muted">—</span>') + '</td>' +
-            '<td><span class="status-pill" style="background:color-mix(in srgb, ' + cor + ' 16%, transparent); color:var(--text-primary);"><span class="d" style="background:' + cor + '"></span>' + esc(CURTO[r.situacao]) + '</span></td>' +
-            '</tr>';
-        }).join("");
-        bindTooltipsPrazo(tbody, pageRows);
-      }
-
-      document.getElementById("pagination").innerHTML =
-        '<button class="btn" id="p-prev" ' + (state.page <= 1 ? "disabled" : "") + '>Anterior</button>' +
-        '<span>Página ' + state.page + ' de ' + totalPages + '</span>' +
-        '<button class="btn" id="p-next" ' + (state.page >= totalPages ? "disabled" : "") + '>Próxima</button>';
-      document.getElementById("p-prev").addEventListener("click", () => { state.page--; renderTable(getVisiveis()); });
-      document.getElementById("p-next").addEventListener("click", () => { state.page++; renderTable(getVisiveis()); });
-
-      window._currentTableData = data;
-    }
-
-    document.querySelectorAll("#detail-table th").forEach(th => {
-      th.addEventListener("click", function () {
-        const key = this.dataset.key;
-        if (state.sortKey === key) state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
-        else { state.sortKey = key; state.sortDir = "desc"; }
-        state.page = 1;
-        renderTable(getVisiveis());
-      });
-    });
-
-    function exportCsv() {
-      const rows = window._currentTableData || [];
-      const headers = ["CT-e", "Serie", "Filial", "Emissao", "Tomador", "Remetente", "Destinatario", "Cidade", "UF", "NF", "Entrega", "Data comprovante", "Situacao", "Prazo (dias uteis)", "Vencimento", "Alerta", "Detalhe do prazo"];
-      const lines = [headers.join(";")];
-      rows.forEach(r => {
-        lines.push([
-          r.cte, r.serie || "", csvSafe(r.filial_nome), r.emissao || "", csvSafe(r.consignatario), csvSafe(r.remetente),
-          csvSafe(r.destinatario), csvSafe(r.cidade_dest || ""), r.uf_dest || "", csvSafe(r.notas_fiscais || ""),
-          r.data_baixa || "", r.data_comprovante || "", ROTULO[r.situacao],
-          r.situacao === "falta_entregue" ? r.prazo_comprovante_dias : "", r.vencimento || "",
-          ROTULO_ALERTA[r.alerta] || "", csvSafe(textoPrazo(r))
-        ].join(";"));
-      });
-      baixarCsv(lines, "comprovantes_filtrado.csv");
-    }
     function baixarCsv(lines, nome) {
       const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
@@ -795,6 +535,8 @@
     };
     let vpBusca = "";
     let vpLinhas = [];
+    const vpAbertos = new Set();  // clientes abertos na tela do nível
+    let vpNivelAnterior = null;
 
     function nivelAberto() {
       const m = /^#prazo\/(\w+)$/.exec(location.hash);
@@ -853,27 +595,62 @@
         lista.innerHTML = '<div class="empty-state">Nenhum CT-e neste nível para os filtros atuais.</div>';
         return;
       }
-      let idx = 0;
-      lista.innerHTML = ordem.map(([nome, rows]) =>
-        '<div class="comp-pend comp-vp-grupo" style="border-left-color:' + cor + '">' +
-        '<div class="comp-pend-head"><strong>' + esc(nome) + '</strong>' +
-        '<span class="comp-de"> · ' + fmtN(rows.length) + ' CT-e ' + esc(ROTULO_ALERTA[nivel].toLowerCase()) + '</span></div>' +
-        '<div class="comp-pend-scroll comp-vp-scroll"><table class="detail comp-pend-table"><thead><tr>' +
-        '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Vencimento</th><th>Prazo do comprovante</th>' +
-        '</tr></thead><tbody>' + rows.map(r =>
-          '<tr>' +
-          '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
-          '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—") + '</td>' +
-          '<td>' + fmtDate(r.emissao) + '</td>' +
-          '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 30)) + '</td>' +
-          '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
-          '<td>' + fmtDate(r.data_baixa) + '</td>' +
-          '<td>' + fmtDate(r.vencimento) + '</td>' +
-          '<td data-prazo="' + (idx++) + '">' + pillPrazo(r) + '</td>' +
-          '</tr>'
-        ).join("") + '</tbody></table></div></div>'
-      ).join("");
-      bindTooltipsPrazo(lista, ordem.flatMap(([, rows]) => rows));
+      // Clientes vêm recolhidos -- a tabela de cada um só é montada quando
+      // ele é aberto (o nível crítico pode ter milhares de CT-e). Com busca
+      // digitada, os clientes encontrados já abrem.
+      if (vpNivelAnterior !== nivel) { vpAbertos.clear(); vpNivelAnterior = nivel; }
+      const comBusca = !!vpBusca.trim();
+      lista.innerHTML =
+        '<div class="comp-vp-acoes"><span class="reset-link" data-acao="abrir">Expandir todos</span>' +
+        '<span class="reset-link" data-acao="fechar">Recolher todos</span></div>' +
+        ordem.map(([nome, rows], i) => {
+          const resumo = nivel === "vencido" || nivel === "critico"
+            ? "maior atraso: " + fmtN(rows[0].atraso || 0) + (rows[0].atraso === 1 ? " dia útil" : " dias úteis")
+            : "próximo vencimento: " + fmtDate(rows.reduce((m, r) => (!m || r.vencimento < m ? r.vencimento : m), ""));
+          return '<details class="comp-pend comp-vp-grupo" data-i="' + i + '" style="border-left-color:' + cor + '"' +
+            (comBusca || vpAbertos.has(nome) ? " open" : "") + '>' +
+            '<summary class="comp-pend-head"><span class="comp-vp-seta">▸</span><strong>' + esc(nome) + '</strong>' +
+            '<span class="comp-vp-qtd" style="--cor:' + cor + '">' + fmtN(rows.length) + ' CT-e</span>' +
+            '<span class="comp-de">' + esc(resumo) + '</span></summary>' +
+            '<div class="comp-vp-corpo"></div></details>';
+        }).join("");
+
+      function preencher(det) {
+        const corpo = det.querySelector(".comp-vp-corpo");
+        if (corpo.dataset.ok) return;
+        const rows = ordem[parseInt(det.dataset.i, 10)][1];
+        corpo.innerHTML =
+          '<div class="comp-pend-scroll comp-vp-scroll"><table class="detail comp-pend-table"><thead><tr>' +
+          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Vencimento</th><th>Prazo do comprovante</th>' +
+          '</tr></thead><tbody>' + rows.map((r, idx) =>
+            '<tr>' +
+            '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
+            '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—") + '</td>' +
+            '<td>' + fmtDate(r.emissao) + '</td>' +
+            '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 30)) + '</td>' +
+            '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
+            '<td>' + fmtDate(r.data_baixa) + '</td>' +
+            '<td>' + fmtDate(r.vencimento) + '</td>' +
+            '<td data-prazo="' + idx + '">' + pillPrazo(r) + '</td>' +
+            '</tr>'
+          ).join("") + '</tbody></table></div>';
+        corpo.dataset.ok = "1";
+        bindTooltipsPrazo(corpo, rows);
+      }
+
+      lista.querySelectorAll("details.comp-vp-grupo").forEach(det => {
+        if (det.open) preencher(det);
+        det.addEventListener("toggle", () => {
+          if (det.open) preencher(det);
+          if (comBusca) return;  // aberto pela busca -- não fica aberto depois de limpar
+          const nome = ordem[parseInt(det.dataset.i, 10)][0];
+          if (det.open) vpAbertos.add(nome); else vpAbertos.delete(nome);
+        });
+      });
+      lista.querySelectorAll(".comp-vp-acoes [data-acao]").forEach(b => b.addEventListener("click", () => {
+        const abrir = b.dataset.acao === "abrir";
+        lista.querySelectorAll("details.comp-vp-grupo").forEach(det => { det.open = abrir; });
+      }));
     }
 
     document.getElementById("vp-voltar").addEventListener("click", e => {
@@ -896,11 +673,6 @@
       baixarCsv(lines, "comprovantes_" + nivel + ".csv");
     });
 
-
-    function getVisiveis() {
-      return getRecorte().filter(r => state.situacoes.has(r.situacao));
-    }
-
     function render() {
       const recorte = getRecorte();
       const visiveis = recorte.filter(r => state.situacoes.has(r.situacao));
@@ -908,10 +680,7 @@
       renderPrazo(recorte);
       renderComposicao(visiveis);
       renderTrend(visiveis);
-      renderClientes();
       renderFiliais(recorte);
-      state.page = 1;
-      renderTable(getVisiveis());
       if (nivelAberto()) renderVistaPrazo();
     }
 

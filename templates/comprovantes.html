@@ -38,7 +38,7 @@
       <span class="filter-label">Situação</span>
       <button class="chip active" data-state="good" data-sit="com" type="button"><span class="dot-swatch" style="background:var(--status-good)"></span>Com comprovante</button>
       <button class="chip active" data-state="entregue" data-sit="falta_entregue" type="button"><span class="dot-swatch" style="background:var(--series-1)"></span>Entregue sem comprovante</button>
-      <button class="chip active" data-state="pendente" data-sit="falta_pendente" type="button"><span class="dot-swatch" style="background:var(--text-muted)"></span>Ainda não entregue</button>
+      <button class="chip active" data-state="pendente" data-sit="falta_pendente" type="button"><span class="dot-swatch" style="background:var(--series-2)"></span>Ainda não entregue</button>
     </div>
     <div class="filter-group" style="flex:1; min-width:200px;">
       <input type="text" id="f-search" placeholder="Buscar CT-e, NF ou empresa…">
@@ -67,37 +67,7 @@
     <div class="chart-subtitle" id="prazo-nota" style="margin:8px 0 0;"></div>
   </section>
 
-  <section class="table-section comp-clientes">
-    <div class="table-toolbar">
-      <div>
-        <h2>Comprovantes por cliente</h2>
-        <div class="chart-subtitle" style="margin:2px 0 0;">Recebidos e faltando por tomador do serviço · clique num cliente para ver os CT-e e notas fiscais sem comprovante</div>
-      </div>
-      <div style="flex:1"></div>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <input type="text" id="c-search" placeholder="Filtrar cliente…">
-        <button class="btn" id="c-export">Baixar CSV</button>
-      </div>
-    </div>
-    <div class="table-scroll comp-clientes-scroll">
-      <table class="detail comp-clientes-table" id="clientes-table">
-        <thead>
-          <tr>
-            <th data-key="nome">Cliente</th>
-            <th data-key="total" class="num">CT-e</th>
-            <th data-key="com" class="num">Recebidos</th>
-            <th data-key="falta" class="num">Faltando</th>
-            <th data-key="gravidade">Prazo</th>
-            <th data-key="pct" class="comp-col-barra">% recebido</th>
-          </tr>
-        </thead>
-        <tbody id="clientes-body"></tbody>
-      </table>
-    </div>
-    <div class="legend" id="legend-clientes"></div>
-  </section>
-
-  <section class="grid-2" style="margin-top:14px;">
+  <section class="grid-2">
     <figure class="chart-card">
       <div class="chart-title">Comprovantes por data de emissão</div>
       <div class="chart-subtitle" id="trend-subtitle">CT-e emitidos por dia, pela situação do comprovante</div>
@@ -109,36 +79,6 @@
       <div class="chart-subtitle">Percentual de CT-e com comprovante em cada filial</div>
       <div id="chart-filiais"></div>
     </figure>
-  </section>
-
-  <section class="table-section">
-    <div class="table-toolbar">
-      <h2>CT-e</h2>
-      <span class="count" id="table-count"></span>
-      <div style="flex:1"></div>
-      <button class="btn" id="t-export">Baixar CSV</button>
-    </div>
-    <div class="table-scroll">
-      <table class="detail" id="detail-table">
-        <thead>
-          <tr>
-            <th data-key="cte">CT-e</th>
-            <th data-key="filial_nome">Filial</th>
-            <th data-key="emissao">Emissão</th>
-            <th data-key="consignatario">Tomador</th>
-            <th data-key="destinatario">Destinatário</th>
-            <th data-key="cidade_dest">Cidade / UF</th>
-            <th data-key="notas_fiscais">NF</th>
-            <th data-key="data_baixa">Entrega</th>
-            <th data-key="data_comprovante">Comprovante</th>
-            <th data-key="alerta_rank">Prazo</th>
-            <th data-key="situacao">Situação</th>
-          </tr>
-        </thead>
-        <tbody id="table-body"></tbody>
-      </table>
-    </div>
-    <div class="pagination" id="pagination"></div>
   </section>
 
   </div>
