@@ -77,9 +77,14 @@
   }
 
   async function loadData() {
-    const resp = await fetch("/api/cargas", { credentials: "same-origin" });
+    const [resp, respTrat] = await Promise.all([
+      fetch("/api/cargas", { credentials: "same-origin" }),
+      fetch("/api/tratativas", { credentials: "same-origin" })
+    ]);
     if (resp.status === 401) { window.location.href = "/login"; return null; }
-    return resp.json();
+    const data = await resp.json();
+    data.tratativas = respTrat.ok ? (await respTrat.json()).tratativas : [];
+    return data;
   }
 
   function situacaoDe(r) {
@@ -524,6 +529,209 @@
     }
     function csvSafe(s) { return '"' + String(s).replace(/"/g, '""') + '"'; }
 
+    // ---- tratativas: o que está sendo feito pra conseguir cada comprovante ----
+    // Lançadas pela janela de tratativa (botão na lista de CT-e de cada
+    // cliente e no resultado da busca) e gravadas no banco (/api/tratativas).
+    const ROTULO_TRAT = { andamento: "Em andamento", resolvido: "Resolvido" };
+    const COR_TRAT = { andamento: "var(--series-1)", resolvido: "var(--status-good)" };
+    const tratPorCte = new Map();  // id_cte -> lançamentos, do mais antigo pro mais novo
+    (DATA.tratativas || []).forEach(t => {
+      if (!tratPorCte.has(t.id_cte)) tratPorCte.set(t.id_cte, []);
+      tratPorCte.get(t.id_cte).push(t);
+    });
+    const recPorId = new Map(records.map(r => [r.id_cte, r]));
+
+    function ultimaTrat(idCte) {
+      const lista = tratPorCte.get(idCte);
+      return lista && lista.length ? lista[lista.length - 1] : null;
+    }
+    function fmtDataHora(iso) {
+      if (!iso) return "—";
+      return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+    function pillTrat(situacao) {
+      const cor = COR_TRAT[situacao] || "var(--text-muted)";
+      return '<span class="status-pill" style="background:color-mix(in srgb, ' + cor + ' 18%, transparent); color:var(--text-primary);"><span class="d" style="background:' + cor + '"></span>' +
+        esc(ROTULO_TRAT[situacao] || situacao) + '</span>';
+    }
+    // Célula "Tratativa" das listas -- `idx` aponta pra linha no array da tabela.
+    function celulaTrat(r, idx) {
+      const ult = ultimaTrat(r.id_cte);
+      const n = (tratPorCte.get(r.id_cte) || []).length;
+      if (!ult) return '<button type="button" class="btn comp-trat-btn" data-trat="' + idx + '">+ Registrar</button>';
+      return '<div class="comp-trat-cel">' + pillTrat(ult.situacao) +
+        '<span class="comp-trat-txt" title="' + esc(ult.texto) + '">' + esc(truncate(ult.texto, 40)) + '</span>' +
+        '<button type="button" class="btn comp-trat-btn" data-trat="' + idx + '">' + (n > 1 ? "Ver (" + n + ")" : "Ver") + '</button></div>';
+    }
+    function bindBotoesTrat(container, rowsByIdx) {
+      container.querySelectorAll("[data-trat]").forEach(b => b.addEventListener("click", e => {
+        e.stopPropagation();
+        abrirTratativa(rowsByIdx[parseInt(b.dataset.trat, 10)]);
+      }));
+    }
+    function contarTrat(rows) {
+      const c = { andamento: 0, resolvido: 0 };
+      rows.forEach(r => { const u = ultimaTrat(r.id_cte); if (u) c[u.situacao] = (c[u.situacao] || 0) + 1; });
+      return c;
+    }
+
+    // Janela de tratativa de um CT-e: histórico + formulário de novo lançamento.
+    const modal = document.getElementById("trat-modal");
+    let tratAtual = null;
+    const RESP_KEY = "comprovantes-responsavel";
+
+    function abrirTratativa(r) {
+      tratAtual = r;
+      renderModal();
+      modal.hidden = false;
+      const resp = document.getElementById("trat-responsavel");
+      try { if (!resp.value) resp.value = localStorage.getItem(RESP_KEY) || ""; } catch (e) { /* sem storage */ }
+      document.getElementById("trat-texto").value = "";
+      document.getElementById("trat-erro").textContent = "";
+      document.querySelector('input[name="trat-situacao"][value="andamento"]').checked = true;
+      setTimeout(() => document.getElementById("trat-texto").focus(), 0);
+    }
+    function fecharTratativa() { modal.hidden = true; tratAtual = null; }
+
+    function renderModal() {
+      const r = tratAtual;
+      document.getElementById("trat-titulo").innerHTML =
+        'CT-e ' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") +
+        ' <span class="comp-de">· ' + esc(r.consignatario || r.cliente || "—") + '</span>';
+      const info = [
+        ["Nota(s) fiscal(is)", esc(r.notas_fiscais || "—")],
+        ["Destino", r.cidade_dest ? esc(r.cidade_dest + "/" + r.uf_dest) : "—"],
+        ["Entrega", fmtDate(r.data_baixa)],
+        ["Comprovante", r.data_comprovante ? "Recebido em " + fmtDate(r.data_comprovante) : (r.foraDaJanela ? "—" : "Falta")],
+        ["Prazo", r.alerta ? pillPrazo(r) : "—"]
+      ];
+      document.getElementById("trat-info").innerHTML = info.map(([k, v]) =>
+        '<div><span class="comp-trat-k">' + esc(k) + '</span><span>' + v + '</span></div>').join("") +
+        (r.foraDaJanela ? '<div class="comp-trat-aviso">Este CT-e saiu da janela sincronizada (90 dias) -- dá pra consultar o histórico, mas não lançar tratativa nova.</div>' : "");
+
+      const hist = tratPorCte.get(r.id_cte) || [];
+      document.getElementById("trat-historico").innerHTML = hist.length
+        ? hist.slice().reverse().map(t =>
+            '<div class="comp-trat-item">' +
+            '<div class="comp-trat-item-head">' + pillTrat(t.situacao) +
+            '<span class="comp-de">' + fmtDataHora(t.criado_em) + (t.responsavel ? " · " + esc(t.responsavel) : "") + '</span>' +
+            '<span class="reset-link comp-trat-apagar" data-id="' + t.id + '">apagar</span></div>' +
+            '<div class="comp-trat-item-txt">' + esc(t.texto) + '</div></div>'
+          ).join("")
+        : '<div class="comp-de">Nenhuma tratativa registrada ainda.</div>';
+      document.querySelectorAll(".comp-trat-apagar").forEach(a => a.addEventListener("click", () => apagarTratativa(parseInt(a.dataset.id, 10))));
+      document.getElementById("trat-form").hidden = !!r.foraDaJanela;
+    }
+
+    async function salvarTratativa(e) {
+      e.preventDefault();
+      const erro = document.getElementById("trat-erro");
+      const btn = document.getElementById("trat-salvar");
+      const texto = document.getElementById("trat-texto").value.trim();
+      const responsavel = document.getElementById("trat-responsavel").value.trim();
+      const situacao = document.querySelector('input[name="trat-situacao"]:checked').value;
+      if (!texto) { erro.textContent = "Descreva o que está sendo feito."; return; }
+      btn.disabled = true; erro.textContent = "";
+      try {
+        const resp = await fetch("/api/tratativas", {
+          method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id_cte: tratAtual.id_cte, texto, situacao, responsavel })
+        });
+        const body = await resp.json();
+        if (!resp.ok) throw new Error(body.erro || "Falha ao salvar.");
+        if (!tratPorCte.has(body.id_cte)) tratPorCte.set(body.id_cte, []);
+        tratPorCte.get(body.id_cte).push(body);
+        try { localStorage.setItem(RESP_KEY, responsavel); } catch (err) { /* sem storage */ }
+        fecharTratativa();
+        atualizarListas();
+      } catch (err) {
+        erro.textContent = err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function apagarTratativa(id) {
+      if (!confirm("Apagar este lançamento de tratativa?")) return;
+      const resp = await fetch("/api/tratativas/" + id, { method: "DELETE", credentials: "same-origin" });
+      if (!resp.ok) { alert("Não foi possível apagar."); return; }
+      const lista = tratPorCte.get(tratAtual.id_cte) || [];
+      const i = lista.findIndex(t => t.id === id);
+      if (i >= 0) lista.splice(i, 1);
+      renderModal();
+      atualizarListas();
+    }
+
+    document.getElementById("trat-form").addEventListener("submit", salvarTratativa);
+    document.getElementById("trat-cancelar").addEventListener("click", fecharTratativa);
+    document.getElementById("trat-fechar").addEventListener("click", fecharTratativa);
+    modal.addEventListener("click", e => { if (e.target === modal) fecharTratativa(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && !modal.hidden) fecharTratativa(); });
+
+    // ---- busca por CT-e / NF (campo de busca do topo) ----
+    // Procura em todos os CT-e sincronizados (sem os outros filtros) e no
+    // texto das tratativas; tratativa de CT-e que já saiu da janela aparece
+    // pelo que foi gravado no lançamento.
+    const MAX_BUSCA = 100;
+    function buscar(q) {
+      const achados = records.filter(r =>
+        String(r.cte || "").toLowerCase().includes(q) ||
+        String(r.notas_fiscais || "").toLowerCase().includes(q) ||
+        r.consignatario.toLowerCase().includes(q) ||
+        r.destinatario.toLowerCase().includes(q) ||
+        (tratPorCte.get(r.id_cte) || []).some(t => t.texto.toLowerCase().includes(q)));
+      tratPorCte.forEach((lista, idCte) => {
+        if (recPorId.has(idCte) || !lista.length) return;
+        const t = lista[lista.length - 1];
+        if (lista.some(x => String(x.cte || "").toLowerCase().includes(q) || String(x.notas_fiscais || "").toLowerCase().includes(q) ||
+            String(x.cliente || "").toLowerCase().includes(q) || x.texto.toLowerCase().includes(q))) {
+          achados.push({ id_cte: idCte, cte: t.cte, serie: t.serie, notas_fiscais: t.notas_fiscais, consignatario: t.cliente || "—", foraDaJanela: true });
+        }
+      });
+      // Número exato de CT-e/NF primeiro, depois os mais recentes.
+      const exato = r => String(r.cte || "") === q || String(r.notas_fiscais || "").split(/[^0-9]+/).includes(q) ? 0 : 1;
+      return achados.sort((a, b) => exato(a) - exato(b) || String(b.emissao || "").localeCompare(String(a.emissao || "")));
+    }
+
+    function renderBusca() {
+      const sec = document.getElementById("busca-sec");
+      const q = state.search;
+      if (!q || nivelAberto()) { sec.hidden = true; return; }
+      sec.hidden = false;
+      const achados = buscar(q);
+      const mostrar = achados.slice(0, MAX_BUSCA);
+      document.getElementById("busca-titulo").textContent = 'Resultado da busca por "' + q + '"';
+      document.getElementById("busca-sub").textContent = achados.length
+        ? fmtN(achados.length) + " CT-e encontrado(s)" + (achados.length > MAX_BUSCA ? " · mostrando os " + MAX_BUSCA + " primeiros, refine a busca" : "")
+        : "Nenhum CT-e encontrado.";
+      const corpo = document.getElementById("busca-corpo");
+      if (!mostrar.length) { corpo.innerHTML = ""; return; }
+      corpo.innerHTML =
+        '<div class="comp-pend-scroll comp-busca-scroll"><table class="detail comp-pend-table"><thead><tr>' +
+        '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Cliente</th><th>Cidade / UF</th><th>Entrega</th><th>Comprovante</th><th>Prazo</th><th>Tratativa</th>' +
+        '</tr></thead><tbody>' + mostrar.map((r, idx) =>
+          '<tr>' +
+          '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
+          '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—") + '</td>' +
+          '<td title="' + esc(r.consignatario) + '">' + esc(truncate(r.consignatario, 28)) + '</td>' +
+          '<td>' + (r.foraDaJanela ? '<span class="bip-muted">fora da janela sincronizada</span>' : esc(r.cidade_dest) + '/' + esc(r.uf_dest)) + '</td>' +
+          '<td>' + fmtDate(r.data_baixa) + '</td>' +
+          '<td>' + (r.foraDaJanela ? "—" : r.data_comprovante ? fmtDate(r.data_comprovante) : '<span class="flag-no">Falta</span>') + '</td>' +
+          '<td data-prazo="' + idx + '">' + (pillPrazo(r) || '<span class="bip-muted">—</span>') + '</td>' +
+          '<td>' + celulaTrat(r, idx) + '</td>' +
+          '</tr>'
+        ).join("") + '</tbody></table></div>';
+      bindTooltipsPrazo(corpo, mostrar);
+      bindBotoesTrat(corpo, mostrar);
+    }
+
+    // Depois de lançar/apagar uma tratativa: atualiza a busca e a tela do
+    // nível (mantendo abertos os clientes que estavam abertos).
+    function atualizarListas() {
+      renderBusca();
+      if (nivelAberto()) renderVistaPrazo();
+    }
+
     // ---- tela "#prazo/<nível>": CT-e e NF daquele nível, por cliente ----
     // Respeita os filtros do topo (período, tomador, filial, busca); o
     // botão Voltar (ou o voltar do navegador) retorna à visão geral.
@@ -549,6 +757,7 @@
       document.getElementById("vista-prazo").hidden = !nivel;
       document.getElementById("f-situacao").hidden = !!nivel;  // só faz sentido na visão geral
       hideTooltip();
+      renderBusca();
       if (nivel) renderVistaPrazo();
       window.scrollTo(0, 0);
     }
@@ -607,11 +816,15 @@
           const resumo = nivel === "vencido" || nivel === "critico"
             ? "maior atraso: " + fmtN(rows[0].atraso || 0) + (rows[0].atraso === 1 ? " dia útil" : " dias úteis")
             : "próximo vencimento: " + fmtDate(rows.reduce((m, r) => (!m || r.vencimento < m ? r.vencimento : m), ""));
+          const ct = contarTrat(rows);
+          const trat = [ct.andamento ? fmtN(ct.andamento) + " em andamento" : "", ct.resolvido ? fmtN(ct.resolvido) + " resolvido(s)" : ""]
+            .filter(Boolean).join(" · ");
           return '<details class="comp-pend comp-vp-grupo" data-i="' + i + '" style="border-left-color:' + cor + '"' +
             (comBusca || vpAbertos.has(nome) ? " open" : "") + '>' +
             '<summary class="comp-pend-head"><span class="comp-vp-seta">▸</span><strong>' + esc(nome) + '</strong>' +
             '<span class="comp-vp-qtd" style="--cor:' + cor + '">' + fmtN(rows.length) + ' CT-e</span>' +
-            '<span class="comp-de">' + esc(resumo) + '</span></summary>' +
+            '<span class="comp-de">' + esc(resumo) + '</span>' +
+            (trat ? '<span class="comp-vp-trat">' + esc(trat) + '</span>' : "") + '</summary>' +
             '<div class="comp-vp-corpo"></div></details>';
         }).join("");
 
@@ -621,7 +834,7 @@
         const rows = ordem[parseInt(det.dataset.i, 10)][1];
         corpo.innerHTML =
           '<div class="comp-pend-scroll comp-vp-scroll"><table class="detail comp-pend-table"><thead><tr>' +
-          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Vencimento</th><th>Prazo do comprovante</th>' +
+          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Vencimento</th><th>Prazo do comprovante</th><th>Tratativa</th>' +
           '</tr></thead><tbody>' + rows.map((r, idx) =>
             '<tr>' +
             '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
@@ -632,10 +845,12 @@
             '<td>' + fmtDate(r.data_baixa) + '</td>' +
             '<td>' + fmtDate(r.vencimento) + '</td>' +
             '<td data-prazo="' + idx + '">' + pillPrazo(r) + '</td>' +
+            '<td>' + celulaTrat(r, idx) + '</td>' +
             '</tr>'
           ).join("") + '</tbody></table></div>';
         corpo.dataset.ok = "1";
         bindTooltipsPrazo(corpo, rows);
+        bindBotoesTrat(corpo, rows);
       }
 
       lista.querySelectorAll("details.comp-vp-grupo").forEach(det => {
@@ -664,11 +879,14 @@
     document.getElementById("vp-export").addEventListener("click", () => {
       const nivel = nivelAberto();
       const lines = [["Cliente", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega",
-        "Prazo (dias uteis)", "Vencimento", "Alerta", "Detalhe do prazo"].join(";")];
+        "Prazo (dias uteis)", "Vencimento", "Alerta", "Detalhe do prazo", "Tratativa", "Ultima tratativa", "Responsavel", "Data da tratativa"].join(";")];
       vpLinhas.forEach(r => {
+        const t = ultimaTrat(r.id_cte);
         lines.push([csvSafe(r.consignatario), r.cte, r.serie || "", csvSafe(r.notas_fiscais || ""), r.emissao || "",
           csvSafe(r.destinatario), csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "",
-          r.prazo_comprovante_dias, r.vencimento || "", ROTULO_ALERTA[r.alerta], csvSafe(textoPrazo(r))].join(";"));
+          r.prazo_comprovante_dias, r.vencimento || "", ROTULO_ALERTA[r.alerta], csvSafe(textoPrazo(r)),
+          t ? ROTULO_TRAT[t.situacao] : "", csvSafe(t ? t.texto : ""), csvSafe(t ? t.responsavel || "" : ""),
+          t ? fmtDataHora(t.criado_em) : ""].join(";"));
       });
       baixarCsv(lines, "comprovantes_" + nivel + ".csv");
     });
@@ -681,6 +899,7 @@
       renderComposicao(visiveis);
       renderTrend(visiveis);
       renderFiliais(recorte);
+      renderBusca();
       if (nivelAberto()) renderVistaPrazo();
     }
 

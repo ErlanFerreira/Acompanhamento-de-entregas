@@ -41,7 +41,7 @@
       <button class="chip active" data-state="pendente" data-sit="falta_pendente" type="button"><span class="dot-swatch" style="background:var(--series-2)"></span>Ainda não entregue</button>
     </div>
     <div class="filter-group" style="flex:1; min-width:200px;">
-      <input type="text" id="f-search" placeholder="Buscar CT-e, NF ou empresa…">
+      <input type="text" id="f-search" placeholder="Buscar CT-e, NF, empresa ou tratativa…">
     </div>
     <span class="reset-link" id="f-reset">Limpar filtros</span>
   </section>
@@ -49,6 +49,16 @@
   <!-- Visão geral (padrão). Clicar num nível do quadro de prazo troca pra
        a tela "#prazo/<nível>" logo abaixo, com os CT-e daquele nível. -->
   <div id="vista-geral">
+  <section class="table-section comp-busca" id="busca-sec" hidden>
+    <div class="table-toolbar">
+      <div>
+        <h2 id="busca-titulo"></h2>
+        <div class="chart-subtitle" id="busca-sub" style="margin:2px 0 0;"></div>
+      </div>
+    </div>
+    <div id="busca-corpo"></div>
+  </section>
+
   <section class="kpis" id="kpis"></section>
 
   <section class="comp-strip" id="comp-strip">
@@ -106,6 +116,36 @@
 </div>
 
 <div class="tooltip" id="tooltip"></div>
+
+<div class="modal-overlay" id="trat-modal" hidden>
+  <div class="modal-card comp-trat-modal" role="dialog" aria-modal="true" aria-labelledby="trat-titulo">
+    <div class="comp-trat-topo">
+      <h3 id="trat-titulo"></h3>
+      <button type="button" class="btn" id="trat-fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="comp-trat-info" id="trat-info"></div>
+    <div class="comp-trat-sec">Histórico de tratativas</div>
+    <div class="comp-trat-historico" id="trat-historico"></div>
+    <form id="trat-form">
+      <div class="comp-trat-sec">Nova tratativa</div>
+      <div class="comp-trat-situacoes">
+        <label><input type="radio" name="trat-situacao" value="andamento" checked> Em andamento</label>
+        <label><input type="radio" name="trat-situacao" value="resolvido"> Resolvido</label>
+      </div>
+      <label>O que está sendo feito / o que foi resolvido
+        <textarea id="trat-texto" rows="3" maxlength="5000" placeholder="Ex.: cobrado do parceiro por e-mail em 09/10, aguardando retorno"></textarea>
+      </label>
+      <label><span>Responsável <span class="hint">(opcional)</span></span>
+        <input type="text" id="trat-responsavel" maxlength="120" placeholder="Seu nome">
+      </label>
+      <div class="modal-error show" id="trat-erro" style="background:none; padding:0;"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="trat-cancelar">Cancelar</button>
+        <button type="submit" class="btn-primary" id="trat-salvar">Salvar tratativa</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %}
 {% block scripts %}
 <script src="/static/comprovantes.js"></script>

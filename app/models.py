@@ -86,6 +86,27 @@ class ProtocoloFatura(Base):
     arquivo = Column(LargeBinary, nullable=True)
 
 
+class TratativaComprovante(Base):
+    """O que está sendo feito pra conseguir o comprovante de um CT-e
+    (lançado na tela de Comprovantes). Cada lançamento é uma linha -- o
+    histórico do CT-e é a sequência delas. Guarda CT-e, NF e cliente do
+    momento do lançamento pra continuar achável na busca mesmo depois que o
+    CT-e sair da janela sincronizada."""
+
+    __tablename__ = "tratativas_comprovante"
+
+    id = Column(Integer, primary_key=True)
+    id_cte = Column(String(80), nullable=False, index=True)  # mesma chave de Carga.id_cte
+    cte = Column(String(50), index=True)
+    serie = Column(String(10), nullable=True)
+    notas_fiscais = Column(Text, nullable=True)
+    cliente = Column(String(255), nullable=True)
+    situacao = Column(String(20), nullable=False)  # andamento|resolvido
+    texto = Column(Text, nullable=False)
+    responsavel = Column(String(120), nullable=True)
+    criado_em = Column(DateTime, default=datetime.datetime.utcnow)
+
+
 class Meta(Base):
     __tablename__ = "meta"
 

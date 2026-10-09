@@ -74,6 +74,12 @@ def require_auth_api(request: Request):
         raise HTTPException(status_code=401, detail="Não autenticado.")
 
 
+def require_acesso_completo_api(request: Request):
+    require_auth_api(request)
+    if not tem_acesso_completo(request):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
 def require_acesso_completo_page(request: Request):
     """Telas restritas a quem entrou com a senha -- quem veio pelo link de
     acesso volta pro painel, como se a tela não existisse."""

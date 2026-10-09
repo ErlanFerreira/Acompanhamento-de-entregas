@@ -377,3 +377,34 @@ a.btn { text-decoration: none; }
   background: linear-gradient(var(--series-1), var(--series-2));
 }
 .comp-card.misto .label .d { background: linear-gradient(135deg, var(--series-1) 50%, var(--series-2) 50%); }
+
+/* busca por CT-e/NF e tratativas de comprovante */
+.comp-busca { margin-bottom: 14px; border-left: 4px solid var(--accent); }
+.comp-busca .chart-subtitle { font-size: 12px; color: var(--text-muted); }
+.comp-busca-scroll { max-height: 420px; }
+.comp-trat-btn { padding: 2px 9px; font-size: 12px; white-space: nowrap; }
+.comp-trat-cel { display: flex; align-items: center; gap: 6px; }
+.comp-trat-txt { font-size: 11.5px; color: var(--text-secondary); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comp-vp-trat { font-size: 11.5px; color: var(--text-secondary); padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.modal-card.comp-trat-modal { max-width: 640px; max-height: 90vh; overflow-y: auto; gap: 10px; }
+.comp-trat-topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.comp-trat-topo h3 { font-size: 16px; }
+.comp-trat-info { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 16px; font-size: 12.5px; color: var(--text-primary); }
+.comp-trat-info > div { display: flex; flex-direction: column; gap: 2px; }
+.comp-trat-k { font-size: 11px; color: var(--text-muted); }
+.comp-trat-aviso { grid-column: 1 / -1; font-size: 12px; color: var(--text-secondary); background: var(--gridline); padding: 6px 10px; border-radius: 7px; }
+.comp-trat-sec { font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); margin-top: 6px; }
+.comp-trat-historico { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; }
+.comp-trat-item { border: 1px solid var(--gridline); border-radius: 8px; padding: 8px 10px; }
+.comp-trat-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.comp-trat-apagar { margin-left: auto; font-size: 11.5px; }
+.comp-trat-item-txt { font-size: 13px; color: var(--text-primary); margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+#trat-form { display: flex; flex-direction: column; gap: 10px; }
+.comp-trat-situacoes { display: flex; gap: 18px; font-size: 13px; color: var(--text-primary); }
+.comp-trat-situacoes label { flex-direction: row !important; align-items: center; gap: 6px !important; cursor: pointer; }
+.comp-trat-modal textarea {
+  font: inherit; font-size: 13px; color: var(--text-primary); background: var(--page-plane);
+  border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; resize: vertical;
+}
+.comp-trat-modal input[type="text"] { min-width: 0; padding: 7px 10px; }
+.comp-trat-item-head .comp-de { font-size: 12px; }

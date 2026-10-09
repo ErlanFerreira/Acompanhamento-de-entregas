@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from . import chave_cte, config, relatorios_bipagem
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
-from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura
+from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura, TratativaComprovante
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
@@ -31,6 +31,7 @@ from .security import (
     VIA_SENHA,
     create_share_token,
     is_authenticated,
+    require_acesso_completo_api,
     require_acesso_completo_page,
     require_auth_api,
     require_auth_page,
@@ -141,6 +142,7 @@ def comprovantes_page(request: Request):
 def _row_to_dict(r: Carga) -> dict:
     prazo_dias, distancia_km = prazo_comprovante(r.cidade_dest, r.uf_dest)
     return {
+        "id_cte": r.id_cte,
         "emissao": r.emissao,
         "cte": r.cte,
         "remetente": r.remetente,
@@ -192,6 +194,72 @@ def api_cargas(
         "fonte": "Webtrans (GW Sistemas) - relatório \"Pendências\", atualização automática",
     }
     return {"meta": meta, "records": records}
+
+
+# ------------------------------------------- tratativas de comprovante ----
+
+SITUACOES_TRATATIVA = ("andamento", "resolvido")
+
+
+def _tratativa_to_dict(t: TratativaComprovante) -> dict:
+    return {
+        "id": t.id,
+        "id_cte": t.id_cte,
+        "cte": t.cte,
+        "serie": t.serie,
+        "notas_fiscais": t.notas_fiscais,
+        "cliente": t.cliente,
+        "situacao": t.situacao,
+        "texto": t.texto,
+        "responsavel": t.responsavel,
+        "criado_em": t.criado_em.isoformat() + "Z" if t.criado_em else None,
+    }
+
+
+@app.get("/api/tratativas", dependencies=[Depends(require_acesso_completo_api)])
+def api_tratativas(db: Session = Depends(get_db)):
+    """Todas as tratativas lançadas (são poucas, digitadas à mão) -- a tela
+    agrupa por CT-e e busca por CT-e/NF no navegador."""
+    rows = db.query(TratativaComprovante).order_by(TratativaComprovante.criado_em.asc()).all()
+    return {"tratativas": [_tratativa_to_dict(t) for t in rows]}
+
+
+@app.post("/api/tratativas", dependencies=[Depends(require_acesso_completo_api)])
+def api_tratativas_registrar(payload: dict, db: Session = Depends(get_db)):
+    id_cte = str(payload.get("id_cte") or "").strip()
+    texto = str(payload.get("texto") or "").strip()
+    situacao = str(payload.get("situacao") or "").strip()
+    responsavel = str(payload.get("responsavel") or "").strip()[:120] or None
+    if not texto:
+        return JSONResponse({"erro": "Descreva o que está sendo feito."}, status_code=400)
+    if situacao not in SITUACOES_TRATATIVA:
+        return JSONResponse({"erro": "Situação inválida."}, status_code=400)
+    carga = db.query(Carga).filter(Carga.id_cte == id_cte).first()
+    if not carga:
+        return JSONResponse({"erro": "CT-e não encontrado."}, status_code=404)
+    t = TratativaComprovante(
+        id_cte=carga.id_cte,
+        cte=carga.cte,
+        serie=carga.serie,
+        notas_fiscais=carga.notas_fiscais,
+        cliente=carga.consignatario,
+        situacao=situacao,
+        texto=texto[:5000],
+        responsavel=responsavel,
+    )
+    db.add(t)
+    db.commit()
+    return _tratativa_to_dict(t)
+
+
+@app.delete("/api/tratativas/{tratativa_id}", dependencies=[Depends(require_acesso_completo_api)])
+def api_tratativas_remover(tratativa_id: int, db: Session = Depends(get_db)):
+    """Apaga um lançamento feito por engano."""
+    apagados = db.query(TratativaComprovante).filter(TratativaComprovante.id == tratativa_id).delete()
+    db.commit()
+    if not apagados:
+        return JSONResponse({"erro": "Tratativa não encontrada."}, status_code=404)
+    return {"ok": True}
 
 
 def _dispatch_workflow(workflow_file: str, inputs: dict | None = None):
