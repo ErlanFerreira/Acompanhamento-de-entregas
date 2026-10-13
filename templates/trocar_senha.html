@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trocar senha — Painel Transrota</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" action="/trocar-senha">
+    {% if obrigatoria %}
+    <h1>Defina sua senha</h1>
+    <p class="login-sub">Olá, {{ analista.nome }}. Antes de continuar, troque a senha provisória que você recebeu por uma só sua.</p>
+    {% else %}
+    <h1>Trocar senha</h1>
+    <p class="login-sub">{{ analista.nome }} ({{ analista.login }})</p>
+    {% endif %}
+    {% if erro %}<div class="login-error">{{ erro }}</div>{% endif %}
+    {% if not obrigatoria %}
+    <label>Senha atual<input type="password" name="atual" required autocomplete="current-password" autofocus></label>
+    {% endif %}
+    <label>Nova senha <span class="login-hint">(mínimo 6 caracteres)</span>
+      <input type="password" name="nova" required minlength="6" autocomplete="new-password" {% if obrigatoria %}autofocus{% endif %}>
+    </label>
+    <label>Confirme a nova senha<input type="password" name="confirmar" required minlength="6" autocomplete="new-password"></label>
+    <button type="submit" class="btn-primary">Salvar nova senha</button>
+    {% if obrigatoria %}
+    <a href="/logout" class="login-link">Sair</a>
+    {% else %}
+    <a href="/painel" class="login-link">Voltar sem trocar</a>
+    {% endif %}
+  </form>
+</body>
+</html>

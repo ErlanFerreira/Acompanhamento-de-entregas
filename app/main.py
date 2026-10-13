@@ -37,6 +37,7 @@ from .security import (
     escopo_empresas,
     hash_senha,
     is_authenticated,
+    precisa_trocar_senha,
     require_acesso_completo_api,
     require_acesso_completo_page,
     require_auth_api,
@@ -117,6 +118,51 @@ def login_submit(request: Request, senha: str = Form(...), usuario: str = Form("
     resp = RedirectResponse(url="/painel", status_code=303)
     resp.set_cookie(COOKIE_NAME, token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="lax")
     return resp
+
+
+def _form_troca(request: Request, erro: str | None = None, status: int = 200):
+    return templates.TemplateResponse(
+        "trocar_senha.html",
+        {"request": request, "erro": erro, "obrigatoria": precisa_trocar_senha(request), "analista": usuario_logado(request)},
+        status_code=status,
+    )
+
+
+@app.get("/trocar-senha", response_class=HTMLResponse)
+def trocar_senha_page(request: Request):
+    """Troca de senha do analista -- obrigatória no primeiro acesso (e depois
+    que o supervisor redefine a senha); fora isso, opcional pelo menu."""
+    if not usuario_logado(request):
+        return RedirectResponse(url="/painel" if is_authenticated(request) else "/login", status_code=303)
+    return _form_troca(request)
+
+
+@app.post("/trocar-senha", response_class=HTMLResponse)
+def trocar_senha_submit(
+    request: Request,
+    nova: str = Form(...),
+    confirmar: str = Form(...),
+    atual: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    analista = usuario_logado(request)
+    if not analista:
+        return RedirectResponse(url="/login", status_code=303)
+    u = db.get(Usuario, analista["id"])
+    # Na troca obrigatória a pessoa acabou de entrar com a senha provisória;
+    # na opcional, confirma a atual (sessão aberta num computador alheio).
+    if not precisa_trocar_senha(request) and not conferir_senha(atual, u.senha_hash):
+        return _form_troca(request, "Senha atual incorreta.", 400)
+    if len(nova) < SENHA_MIN:
+        return _form_troca(request, f"A nova senha deve ter pelo menos {SENHA_MIN} caracteres.", 400)
+    if nova != confirmar:
+        return _form_troca(request, "A confirmação não confere com a nova senha.", 400)
+    if conferir_senha(nova, u.senha_hash):
+        return _form_troca(request, "A nova senha deve ser diferente da atual.", 400)
+    u.senha_hash = hash_senha(nova)
+    u.trocar_senha = False
+    db.commit()
+    return RedirectResponse(url="/painel", status_code=303)
 
 
 @app.get("/logout")
@@ -346,6 +392,7 @@ def _usuario_to_dict(u: Usuario) -> dict:
         "nome": u.nome,
         "login": u.login,
         "ativo": u.ativo,
+        "trocar_senha": bool(u.trocar_senha),
         "empresas": json.loads(u.empresas or "[]"),
         "criado_em": u.criado_em.isoformat() + "Z" if u.criado_em else None,
     }
@@ -398,7 +445,7 @@ def api_usuarios_criar(payload: dict, db: Session = Depends(get_db)):
         return JSONResponse({"erro": erro}, status_code=400)
     u = Usuario(
         nome=dados["nome"], login=dados["login"], senha_hash=hash_senha(dados["senha"]),
-        empresas=json.dumps(dados["empresas"], ensure_ascii=False), ativo=True,
+        empresas=json.dumps(dados["empresas"], ensure_ascii=False), ativo=True, trocar_senha=True,
     )
     db.add(u)
     db.commit()
@@ -418,7 +465,10 @@ def api_usuarios_editar(usuario_id: int, payload: dict, db: Session = Depends(ge
     u.nome, u.login = dados["nome"], dados["login"]
     u.empresas = json.dumps(dados["empresas"], ensure_ascii=False)
     if dados["senha"]:
+        # Senha nova definida pelo supervisor é provisória: o analista troca
+        # no próximo acesso.
         u.senha_hash = hash_senha(dados["senha"])
+        u.trocar_senha = True
     if "ativo" in payload:
         u.ativo = bool(payload["ativo"])
     db.commit()

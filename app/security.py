@@ -104,7 +104,10 @@ def _carregar_sessao(request: Request) -> dict | None:
             u = db.get(Usuario, data.get("uid"))
             if not u or not u.ativo:
                 return None
-            data["usuario"] = {"id": u.id, "nome": u.nome, "login": u.login, "empresas": json.loads(u.empresas or "[]")}
+            data["usuario"] = {
+                "id": u.id, "nome": u.nome, "login": u.login, "empresas": json.loads(u.empresas or "[]"),
+                "trocar_senha": bool(u.trocar_senha),
+            }
         finally:
             db.close()
     return data
@@ -140,16 +143,28 @@ def escopo_empresas(request: Request) -> set[str] | None:
     return set(u["empresas"]) if u else None
 
 
+def precisa_trocar_senha(request: Request) -> bool:
+    """Analista com senha provisória (primeiro acesso ou redefinida pelo
+    supervisor) -- só pode usar a tela de troca de senha."""
+    u = usuario_logado(request)
+    return bool(u and u.get("trocar_senha"))
+
+
 def require_auth_page(request: Request):
-    """Para rotas HTML: redireciona para /login se não autenticado."""
+    """Para rotas HTML: redireciona para /login se não autenticado (ou pra
+    troca de senha, no primeiro acesso do analista)."""
     if not is_authenticated(request):
         raise HTTPException(status_code=303, headers={"Location": "/login"})
+    if precisa_trocar_senha(request):
+        raise HTTPException(status_code=303, headers={"Location": "/trocar-senha"})
 
 
 def require_auth_api(request: Request):
     """Para rotas de API: responde 401 JSON se não autenticado."""
     if not is_authenticated(request):
         raise HTTPException(status_code=401, detail="Não autenticado.")
+    if precisa_trocar_senha(request):
+        raise HTTPException(status_code=403, detail="Troque a senha antes de continuar.")
 
 
 def require_acesso_completo_api(request: Request):

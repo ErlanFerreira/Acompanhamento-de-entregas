@@ -123,6 +123,9 @@ class Usuario(Base):
     # GW (Carga.consignatario / Carga.remetente) -- ver /api/empresas.
     empresas = Column(Text, nullable=False, default="[]")
     ativo = Column(Boolean, default=True, nullable=False)
+    # Senha definida pelo supervisor (cadastro ou redefinição) -- no próximo
+    # login o analista tem de trocar antes de usar o sistema.
+    trocar_senha = Column(Boolean, default=True, nullable=False)
     criado_em = Column(DateTime, default=datetime.datetime.utcnow)
     atualizado_em = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 

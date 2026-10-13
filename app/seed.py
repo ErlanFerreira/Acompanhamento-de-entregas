@@ -16,6 +16,9 @@ _COLUNAS_ADICIONADAS = {
     "bipagens": {
         "protocolo_id": "INTEGER",
     },
+    "usuarios": {
+        "trocar_senha": "BOOLEAN DEFAULT TRUE",
+    },
 }
 
 

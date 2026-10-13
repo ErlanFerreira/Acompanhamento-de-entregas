@@ -45,7 +45,8 @@
         '<td><strong>' + esc(u.nome) + '</strong></td>' +
         '<td>' + esc(u.login) + '</td>' +
         '<td title="' + esc(u.empresas.join("\n")) + '">' + emp + '</td>' +
-        '<td>' + (u.ativo ? '<span class="bip-tag faturado">Ativo</span>' : '<span class="bip-tag">Desativado</span>') + '</td>' +
+        '<td>' + (u.ativo ? '<span class="bip-tag faturado">Ativo</span>' : '<span class="bip-tag">Desativado</span>') +
+          (u.ativo && u.trocar_senha ? ' <span class="bip-tag" title="Ainda não trocou a senha definida por você">senha provisória</span>' : "") + '</td>' +
         '<td class="bip-acoes"><button type="button" class="btn" data-editar="' + i + '">Editar</button> ' +
         '<button type="button" class="btn" data-ativar="' + i + '">' + (u.ativo ? "Desativar" : "Reativar") + '</button></td>' +
         '</tr>';
@@ -72,7 +73,9 @@
     $("usr-login").value = u ? u.login : "";
     $("usr-senha").value = "";
     $("usr-senha").required = !u;
-    $("usr-senha-hint").textContent = u ? "(deixe em branco para manter)" : "(mínimo 6 caracteres)";
+    $("usr-senha-hint").textContent = u
+      ? "(deixe em branco para manter; se preencher, o analista troca no próximo acesso)"
+      : "(provisória: o analista troca no primeiro acesso)";
     $("usr-ativo").checked = u ? u.ativo : true;
     $("usr-ativo-wrap").hidden = !u;
     $("usr-busca").value = "";

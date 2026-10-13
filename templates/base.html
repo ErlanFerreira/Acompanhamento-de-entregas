@@ -26,6 +26,7 @@
       {% set analista = usuario_logado(request) %}
       {% if analista %}
       <div class="sidebar-user" title="Vê só os CT-e das empresas atribuídas pelo supervisor">👤 {{ analista.nome }}</div>
+      <a href="/trocar-senha" class="nav-link">🔑 Trocar senha</a>
       {% else %}
       <button type="button" id="btn-link-acesso" class="nav-link">🔗 Link de acesso</button>
       {% endif %}
