@@ -590,7 +590,13 @@
       renderModal();
       modal.hidden = false;
       const resp = document.getElementById("trat-responsavel");
-      try { if (!resp.value) resp.value = localStorage.getItem(RESP_KEY) || ""; } catch (e) { /* sem storage */ }
+      if (modal.dataset.analista) {
+        // Analista logado: o lançamento sai no nome dele (o servidor também garante).
+        resp.value = modal.dataset.analista;
+        resp.readOnly = true;
+      } else {
+        try { if (!resp.value) resp.value = localStorage.getItem(RESP_KEY) || ""; } catch (e) { /* sem storage */ }
+      }
       document.getElementById("trat-texto").value = "";
       document.getElementById("trat-erro").textContent = "";
       document.querySelector('input[name="trat-situacao"][value="andamento"]').checked = true;

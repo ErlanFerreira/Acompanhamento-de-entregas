@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Usuários — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+  <header class="app-header">
+    <div>
+      <h1>Usuários</h1>
+      <p>Logins dos analistas. Cada analista vê todas as telas, mas os CT-e (Painel, Comprovantes e tratativas) só das empresas marcadas para cada um, como tomador ou remetente. Você continua entrando com a senha geral e vendo tudo.</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="btn-primary" id="btn-novo" type="button" style="margin:0;">+ Novo analista</button>
+      <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+    </div>
+  </header>
+
+  <section class="table-section">
+    <div class="table-toolbar">
+      <h2>Analistas</h2>
+      <span class="count" id="usuarios-count"></span>
+    </div>
+    <div class="table-scroll">
+      <table class="detail" id="usuarios-table">
+        <thead>
+          <tr><th>Nome</th><th>Login</th><th>Empresas</th><th>Situação</th><th></th></tr>
+        </thead>
+        <tbody id="usuarios-body"><tr><td colspan="5"><div class="empty-state">Carregando…</div></td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="app-footer">
+    <strong>Atenção</strong> — quem souber a senha geral entra como supervisor e vê todas as empresas. Se os analistas a conhecem, troque a <code>PAINEL_SENHA</code> na hospedagem depois de cadastrar os logins deles. As telas Consulta de Notas e Emissão de Protocolo não são filtradas por empresa.
+  </footer>
+</div>
+
+<div class="modal-overlay" id="usr-modal" hidden>
+  <form class="modal-card usr-modal" id="usr-form" role="dialog" aria-modal="true" aria-labelledby="usr-titulo">
+    <div class="comp-trat-topo">
+      <h3 id="usr-titulo">Novo analista</h3>
+      <button type="button" class="btn" id="usr-fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="usr-campos">
+      <label>Nome<input type="text" id="usr-nome" maxlength="120" required></label>
+      <label>Login<input type="text" id="usr-login" maxlength="40" required autocapitalize="off" spellcheck="false" placeholder="ex.: maria.silva"></label>
+      <label><span>Senha <span class="hint" id="usr-senha-hint"></span></span><input type="password" id="usr-senha" autocomplete="new-password"></label>
+      <label class="usr-ativo" id="usr-ativo-wrap"><input type="checkbox" id="usr-ativo" checked> Ativo (pode entrar)</label>
+    </div>
+    <div class="comp-trat-sec">Empresas <span id="usr-sel-count" class="usr-sel-count"></span></div>
+    <div class="usr-selecionadas" id="usr-selecionadas"></div>
+    <div class="usr-busca">
+      <input type="text" id="usr-busca" placeholder="Procurar empresa (ex.: BOMBRIL)…">
+      <label class="usr-so-marcadas"><input type="checkbox" id="usr-so-marcadas"> só as marcadas</label>
+    </div>
+    <div class="usr-empresas" id="usr-empresas"><div class="comp-de">Carregando empresas…</div></div>
+    <div class="modal-error show" id="usr-erro" style="background:none; padding:0;"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="usr-cancelar">Cancelar</button>
+      <button type="submit" class="btn-primary" id="usr-salvar">Salvar</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/usuarios.js"></script>
+{% endblock %}

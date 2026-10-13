@@ -18,9 +18,17 @@
       {% endif %}
       <a href="/consultas" class="nav-link {{ 'active' if active == 'consultas' else '' }}">Consulta de Notas</a>
       <a href="/bipagem" class="nav-link {{ 'active' if active == 'bipagem' else '' }}">Emissão de Protocolo</a>
+      {% if eh_supervisor(request) %}
+      <a href="/usuarios" class="nav-link {{ 'active' if active == 'usuarios' else '' }}">Usuários</a>
+      {% endif %}
     </nav>
     <div class="sidebar-footer">
+      {% set analista = usuario_logado(request) %}
+      {% if analista %}
+      <div class="sidebar-user" title="Vê só os CT-e das empresas atribuídas pelo supervisor">👤 {{ analista.nome }}</div>
+      {% else %}
       <button type="button" id="btn-link-acesso" class="nav-link">🔗 Link de acesso</button>
+      {% endif %}
       <a href="/logout" class="nav-link logout">Sair</a>
     </div>
   </aside>

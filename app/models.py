@@ -107,6 +107,26 @@ class TratativaComprovante(Base):
     criado_em = Column(DateTime, default=datetime.datetime.utcnow)
 
 
+class Usuario(Base):
+    """Login de um analista, cadastrado pelo supervisor na tela de Usuários.
+    O analista vê todas as telas, mas os CT-e só das empresas dele -- as que
+    aparecem como tomador (consignatário) ou remetente. O supervisor não tem
+    linha aqui: entra com a senha geral (PAINEL_SENHA)."""
+
+    __tablename__ = "usuarios"
+
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(120), nullable=False)
+    login = Column(String(40), unique=True, nullable=False, index=True)  # minúsculo
+    senha_hash = Column(String(255), nullable=False)
+    # JSON: lista de nomes de empresa em maiúsculas, exatamente como vêm do
+    # GW (Carga.consignatario / Carga.remetente) -- ver /api/empresas.
+    empresas = Column(Text, nullable=False, default="[]")
+    ativo = Column(Boolean, default=True, nullable=False)
+    criado_em = Column(DateTime, default=datetime.datetime.utcnow)
+    atualizado_em = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
 class Meta(Base):
     __tablename__ = "meta"
 

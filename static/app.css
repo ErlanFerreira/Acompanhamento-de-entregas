@@ -409,3 +409,25 @@ a.btn { text-decoration: none; }
 }
 .comp-trat-modal input[type="text"] { min-width: 0; padding: 7px 10px; }
 .comp-trat-item-head .comp-de { font-size: 12px; }
+.login-hint { color: var(--text-muted); font-size: 11.5px; }
+
+/* tela de Usuários (analistas) */
+.modal-card.usr-modal { max-width: 680px; max-height: 92vh; overflow-y: auto; gap: 10px; }
+.usr-campos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.usr-campos input[type="text"], .usr-campos input[type="password"] { min-width: 0; padding: 7px 10px; }
+.usr-ativo { flex-direction: row !important; align-items: center; gap: 6px !important; color: var(--text-primary) !important; align-self: end; padding-bottom: 8px; }
+.usr-sel-count { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.usr-selecionadas { display: flex; flex-wrap: wrap; gap: 6px; }
+.usr-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 4px 2px 9px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text-primary); }
+.usr-chip button { border: none; background: none; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0 3px; }
+.usr-busca { display: flex; gap: 12px; align-items: center; }
+.usr-busca input[type="text"] { flex: 1; padding: 7px 10px; }
+.usr-so-marcadas { flex-direction: row !important; align-items: center; gap: 5px !important; white-space: nowrap; }
+.usr-empresas { border: 1px solid var(--gridline); border-radius: 8px; max-height: 260px; overflow-y: auto; padding: 4px 0; }
+.usr-empresas > .comp-de { padding: 8px 12px; display: block; }
+.usr-empresa { flex-direction: row !important; align-items: center; gap: 8px !important; padding: 5px 12px; cursor: pointer; color: var(--text-primary) !important; }
+.usr-empresa:hover { background: var(--gridline); }
+.usr-empresa-nome { font-weight: 600; font-size: 12.5px; }
+.usr-empresa .comp-de { font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+tr.usr-inativo td { color: var(--text-muted); }
+@media (max-width: 640px) { .usr-campos { grid-template-columns: 1fr; } }

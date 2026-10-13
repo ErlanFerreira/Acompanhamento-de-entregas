@@ -11,7 +11,10 @@
     <h1>Painel de Pendências</h1>
     <p class="login-sub">Transrota</p>
     {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
-    <label>Senha<input type="password" name="senha" required autofocus></label>
+    <label>Usuário <span class="login-hint">(em branco para entrar com a senha geral)</span>
+      <input type="text" name="usuario" value="{{ usuario or '' }}" autocomplete="username" autocapitalize="off" spellcheck="false" autofocus>
+    </label>
+    <label>Senha<input type="password" name="senha" required autocomplete="current-password"></label>
     <button type="submit" class="btn-primary">Entrar</button>
   </form>
 </body>

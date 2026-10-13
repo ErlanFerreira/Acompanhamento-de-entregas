@@ -17,25 +17,34 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
-from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura, TratativaComprovante
+from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura, TratativaComprovante, Usuario
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
     create_session_cookie,
     VIA_LINK,
     VIA_SENHA,
+    VIA_USUARIO,
+    conferir_senha,
     create_share_token,
+    eh_supervisor,
+    escopo_empresas,
+    hash_senha,
     is_authenticated,
     require_acesso_completo_api,
     require_acesso_completo_page,
     require_auth_api,
     require_auth_page,
+    require_supervisor_api,
+    require_supervisor_page,
     tem_acesso_completo,
+    usuario_logado,
     verify_share_token,
 )
 from .seed import init_db_and_seed
@@ -55,9 +64,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-# Usado no menu (base.html) pra esconder as telas restritas de quem entrou
-# pelo link de acesso.
+# Usados no menu (base.html): esconder as telas restritas de quem entrou pelo
+# link de acesso, mostrar Usuários só pro supervisor e o nome do analista.
 templates.env.globals["tem_acesso_completo"] = tem_acesso_completo
+templates.env.globals["eh_supervisor"] = eh_supervisor
+templates.env.globals["usuario_logado"] = usuario_logado
 
 
 @app.exception_handler(HTTPException)
@@ -83,14 +94,26 @@ def login_page(request: Request):
 
 
 @app.post("/login", response_class=HTMLResponse)
-def login_submit(request: Request, senha: str = Form(...)):
-    if not config.PAINEL_SENHA or senha != config.PAINEL_SENHA:
-        return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Senha incorreta."},
-            status_code=401,
-        )
-    token = create_session_cookie(VIA_SENHA)
+def login_submit(request: Request, senha: str = Form(...), usuario: str = Form(""), db: Session = Depends(get_db)):
+    """Sem usuário: senha geral (supervisor). Com usuário: login do analista."""
+    login = usuario.strip().lower()
+    if login:
+        u = db.query(Usuario).filter(Usuario.login == login).first()
+        if not u or not u.ativo or not conferir_senha(senha, u.senha_hash):
+            return templates.TemplateResponse(
+                "login.html",
+                {"request": request, "error": "Usuário ou senha incorretos.", "usuario": usuario},
+                status_code=401,
+            )
+        token = create_session_cookie(VIA_USUARIO, u.id)
+    else:
+        if not config.PAINEL_SENHA or senha != config.PAINEL_SENHA:
+            return templates.TemplateResponse(
+                "login.html",
+                {"request": request, "error": "Senha incorreta."},
+                status_code=401,
+            )
+        token = create_session_cookie(VIA_SENHA)
     resp = RedirectResponse(url="/painel", status_code=303)
     resp.set_cookie(COOKIE_NAME, token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="lax")
     return resp
@@ -117,6 +140,9 @@ def acesso_via_link(token: str):
 
 @app.get("/api/link-acesso", dependencies=[Depends(require_auth_api)])
 def api_link_acesso(request: Request):
+    # O link abre o painel sem filtro de empresa -- analista não gera.
+    if usuario_logado(request):
+        return JSONResponse({"erro": "Not Found"}, status_code=404)
     token = create_share_token()
     url = str(request.base_url).rstrip("/") + f"/acesso/{token}"
     return {"url": url}
@@ -170,13 +196,36 @@ def _row_to_dict(r: Carga) -> dict:
     }
 
 
+def _nome_empresa(coluna):
+    """Nome da empresa como é comparado com a lista do analista."""
+    return func.upper(func.trim(coluna))
+
+
+def _filtro_empresas(empresas: set[str]):
+    """CT-e em que alguma das empresas do analista é tomador ou remetente."""
+    lista = list(empresas) or [""]
+    return or_(_nome_empresa(Carga.consignatario).in_(lista), _nome_empresa(Carga.remetente).in_(lista))
+
+
+def _carga_no_escopo(request: Request, carga: Carga | None) -> bool:
+    empresas = escopo_empresas(request)
+    if carga is None or empresas is None:
+        return carga is not None
+    nomes = {(carga.consignatario or "").strip().upper(), (carga.remetente or "").strip().upper()}
+    return bool(nomes & empresas)
+
+
 @app.get("/api/cargas", dependencies=[Depends(require_auth_api)])
 def api_cargas(
+    request: Request,
     data_inicial: str | None = None,
     data_final: str | None = None,
     db: Session = Depends(get_db),
 ):
     q = db.query(Carga)
+    empresas = escopo_empresas(request)
+    if empresas is not None:
+        q = q.filter(_filtro_empresas(empresas))
     if data_inicial:
         q = q.filter(Carga.emissao >= data_inicial)
     if data_final:
@@ -216,16 +265,27 @@ def _tratativa_to_dict(t: TratativaComprovante) -> dict:
     }
 
 
+def _filtro_tratativas(empresas: set[str]):
+    """Tratativas de CT-e das empresas do analista -- pelo CT-e sincronizado
+    ou, se ele já saiu da janela, pelo cliente gravado no lançamento."""
+    ids = select(Carga.id_cte).where(_filtro_empresas(empresas))
+    return or_(TratativaComprovante.id_cte.in_(ids), _nome_empresa(TratativaComprovante.cliente).in_(list(empresas) or [""]))
+
+
 @app.get("/api/tratativas", dependencies=[Depends(require_acesso_completo_api)])
-def api_tratativas(db: Session = Depends(get_db)):
-    """Todas as tratativas lançadas (são poucas, digitadas à mão) -- a tela
-    agrupa por CT-e e busca por CT-e/NF no navegador."""
-    rows = db.query(TratativaComprovante).order_by(TratativaComprovante.criado_em.asc()).all()
+def api_tratativas(request: Request, db: Session = Depends(get_db)):
+    """As tratativas lançadas (são poucas, digitadas à mão) -- a tela agrupa
+    por CT-e e busca por CT-e/NF no navegador."""
+    q = db.query(TratativaComprovante)
+    empresas = escopo_empresas(request)
+    if empresas is not None:
+        q = q.filter(_filtro_tratativas(empresas))
+    rows = q.order_by(TratativaComprovante.criado_em.asc()).all()
     return {"tratativas": [_tratativa_to_dict(t) for t in rows]}
 
 
 @app.post("/api/tratativas", dependencies=[Depends(require_acesso_completo_api)])
-def api_tratativas_registrar(payload: dict, db: Session = Depends(get_db)):
+def api_tratativas_registrar(request: Request, payload: dict, db: Session = Depends(get_db)):
     id_cte = str(payload.get("id_cte") or "").strip()
     texto = str(payload.get("texto") or "").strip()
     situacao = str(payload.get("situacao") or "").strip()
@@ -235,8 +295,11 @@ def api_tratativas_registrar(payload: dict, db: Session = Depends(get_db)):
     if situacao not in SITUACOES_TRATATIVA:
         return JSONResponse({"erro": "Situação inválida."}, status_code=400)
     carga = db.query(Carga).filter(Carga.id_cte == id_cte).first()
-    if not carga:
+    if not _carga_no_escopo(request, carga):
         return JSONResponse({"erro": "CT-e não encontrado."}, status_code=404)
+    analista = usuario_logado(request)
+    if analista:
+        responsavel = analista["nome"]  # lançamento do analista sai sempre no nome dele
     t = TratativaComprovante(
         id_cte=carga.id_cte,
         cte=carga.cte,
@@ -253,13 +316,113 @@ def api_tratativas_registrar(payload: dict, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/tratativas/{tratativa_id}", dependencies=[Depends(require_acesso_completo_api)])
-def api_tratativas_remover(tratativa_id: int, db: Session = Depends(get_db)):
+def api_tratativas_remover(request: Request, tratativa_id: int, db: Session = Depends(get_db)):
     """Apaga um lançamento feito por engano."""
-    apagados = db.query(TratativaComprovante).filter(TratativaComprovante.id == tratativa_id).delete()
+    q = db.query(TratativaComprovante).filter(TratativaComprovante.id == tratativa_id)
+    empresas = escopo_empresas(request)
+    if empresas is not None:
+        q = q.filter(_filtro_tratativas(empresas))
+    apagados = q.delete(synchronize_session=False)
     db.commit()
     if not apagados:
         return JSONResponse({"erro": "Tratativa não encontrada."}, status_code=404)
     return {"ok": True}
+
+
+# ------------------------------------------------ usuários (analistas) ----
+
+LOGIN_RE = re.compile(r"^[a-z0-9._-]{3,40}$")
+SENHA_MIN = 6
+
+
+@app.get("/usuarios", response_class=HTMLResponse, dependencies=[Depends(require_supervisor_page)])
+def usuarios_page(request: Request):
+    return templates.TemplateResponse("usuarios.html", {"request": request, "active": "usuarios"})
+
+
+def _usuario_to_dict(u: Usuario) -> dict:
+    return {
+        "id": u.id,
+        "nome": u.nome,
+        "login": u.login,
+        "ativo": u.ativo,
+        "empresas": json.loads(u.empresas or "[]"),
+        "criado_em": u.criado_em.isoformat() + "Z" if u.criado_em else None,
+    }
+
+
+@app.get("/api/usuarios", dependencies=[Depends(require_supervisor_api)])
+def api_usuarios(db: Session = Depends(get_db)):
+    rows = db.query(Usuario).order_by(func.lower(Usuario.nome)).all()
+    return {"usuarios": [_usuario_to_dict(u) for u in rows]}
+
+
+@app.get("/api/empresas", dependencies=[Depends(require_supervisor_api)])
+def api_empresas(db: Session = Depends(get_db)):
+    """Empresas que aparecem nos CT-e como tomador ou remetente, com quantos
+    CT-e em cada papel -- é a lista que o supervisor marca pra cada analista."""
+    empresas: dict[str, dict] = {}
+    for papel, coluna in (("tomador", Carga.consignatario), ("remetente", Carga.remetente)):
+        nome = _nome_empresa(coluna)
+        for valor, total in db.query(nome, func.count()).group_by(nome).all():
+            if not valor:
+                continue
+            e = empresas.setdefault(valor, {"nome": valor, "tomador": 0, "remetente": 0})
+            e[papel] += total
+    return {"empresas": sorted(empresas.values(), key=lambda e: e["nome"])}
+
+
+def _validar_usuario(db: Session, payload: dict, usuario_id: int | None) -> tuple[dict | None, str | None]:
+    nome = " ".join(str(payload.get("nome") or "").split())[:120]
+    login = str(payload.get("login") or "").strip().lower()
+    senha = str(payload.get("senha") or "")
+    empresas = sorted({" ".join(str(e).split()).upper() for e in (payload.get("empresas") or []) if str(e).strip()})
+    if not nome:
+        return None, "Informe o nome do analista."
+    if not LOGIN_RE.match(login):
+        return None, "O login deve ter de 3 a 40 caracteres: letras minúsculas, números, ponto, hífen ou sublinhado."
+    if usuario_id is None and not senha:
+        return None, "Defina uma senha."
+    if senha and len(senha) < SENHA_MIN:
+        return None, f"A senha deve ter pelo menos {SENHA_MIN} caracteres."
+    existente = db.query(Usuario).filter(Usuario.login == login).first()
+    if existente and existente.id != usuario_id:
+        return None, "Já existe um analista com esse login."
+    return {"nome": nome, "login": login, "senha": senha, "empresas": empresas}, None
+
+
+@app.post("/api/usuarios", dependencies=[Depends(require_supervisor_api)])
+def api_usuarios_criar(payload: dict, db: Session = Depends(get_db)):
+    dados, erro = _validar_usuario(db, payload, None)
+    if erro:
+        return JSONResponse({"erro": erro}, status_code=400)
+    u = Usuario(
+        nome=dados["nome"], login=dados["login"], senha_hash=hash_senha(dados["senha"]),
+        empresas=json.dumps(dados["empresas"], ensure_ascii=False), ativo=True,
+    )
+    db.add(u)
+    db.commit()
+    return _usuario_to_dict(u)
+
+
+@app.put("/api/usuarios/{usuario_id}", dependencies=[Depends(require_supervisor_api)])
+def api_usuarios_editar(usuario_id: int, payload: dict, db: Session = Depends(get_db)):
+    """Edita nome, login, empresas e situação; a senha só muda se vier
+    preenchida. Desativar derruba o acesso do analista na hora."""
+    u = db.get(Usuario, usuario_id)
+    if not u:
+        return JSONResponse({"erro": "Analista não encontrado."}, status_code=404)
+    dados, erro = _validar_usuario(db, payload, usuario_id)
+    if erro:
+        return JSONResponse({"erro": erro}, status_code=400)
+    u.nome, u.login = dados["nome"], dados["login"]
+    u.empresas = json.dumps(dados["empresas"], ensure_ascii=False)
+    if dados["senha"]:
+        u.senha_hash = hash_senha(dados["senha"])
+    if "ativo" in payload:
+        u.ativo = bool(payload["ativo"])
+    db.commit()
+    return _usuario_to_dict(u)
 
 
 def _dispatch_workflow(workflow_file: str, inputs: dict | None = None):
