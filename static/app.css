@@ -370,13 +370,14 @@ a.btn { text-decoration: none; }
 .comp-vp-scroll { max-height: none; }
 
 /* cards de totais (mesmo visual dos de prazo, sem clique) */
-.comp-card { cursor: default; position: relative; }
+.comp-card { position: relative; }
+.comp-card:hover { background: color-mix(in srgb, var(--cor) 16%, var(--surface-1)); }
 .comp-card.misto { border-left-color: transparent; }
 .comp-card.misto::before {
   content: ""; position: absolute; left: -5px; top: -1px; bottom: -1px; width: 5px; border-radius: 10px 0 0 10px;
   background: linear-gradient(var(--series-1), var(--series-2));
 }
-.comp-card.misto .label .d { background: linear-gradient(135deg, var(--series-1) 50%, var(--series-2) 50%); }
+.comp-card.misto .label .d, .comp-vp-aba.misto .d, .comp-vp-dot.misto { background: linear-gradient(135deg, var(--series-1) 50%, var(--series-2) 50%) !important; }
 
 /* busca por CT-e/NF e tratativas de comprovante */
 .comp-busca { margin-bottom: 14px; border-left: 4px solid var(--accent); }

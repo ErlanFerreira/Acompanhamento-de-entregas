@@ -319,17 +319,22 @@
       // Mesmo visual dos cards de prazo, nas cores da situação; "Faltam" é a
       // soma de entregues (azul) + não entregues (laranja), daí a faixa mista.
       const tiles = [
-        { label: "Total de CT-e", value: fmtN(total), sub: "de " + fmtN(meta.total) + " sincronizados", cor: "var(--text-muted)" },
-        { label: "Com comprovante", value: fmtN(c.com), sub: total ? fmtPct(c.com / total) + " do total" : "—", cor: COR.com },
-        { label: "Faltam comprovante", value: fmtN(faltam), sub: total ? fmtPct(faltam / total) + " do total" : "—", cor: COR.falta_entregue, misto: true },
-        { label: "Entregues sem comprovante", value: fmtN(c.falta_entregue), sub: entregues ? fmtPct(c.falta_entregue / entregues) + " das entregues · cobrar" : "—", cor: COR.falta_entregue },
-        { label: "Ainda não entregues", value: fmtN(c.falta_pendente), sub: faltam ? fmtPct(c.falta_pendente / faltam) + " dos que faltam" : "—", cor: COR.falta_pendente }
+        { k: "total", label: "Total de CT-e", value: fmtN(total), sub: "de " + fmtN(meta.total) + " sincronizados", cor: "var(--text-muted)" },
+        { k: "com", label: "Com comprovante", value: fmtN(c.com), sub: total ? fmtPct(c.com / total) + " do total" : "—", cor: COR.com },
+        { k: "faltam", label: "Faltam comprovante", value: fmtN(faltam), sub: total ? fmtPct(faltam / total) + " do total" : "—", cor: COR.falta_entregue, misto: true },
+        { k: "entregues", label: "Entregues sem comprovante", value: fmtN(c.falta_entregue), sub: entregues ? fmtPct(c.falta_entregue / entregues) + " das entregues · cobrar" : "—", cor: COR.falta_entregue },
+        { k: "pendentes", label: "Ainda não entregues", value: fmtN(c.falta_pendente), sub: faltam ? fmtPct(c.falta_pendente / faltam) + " dos que faltam" : "—", cor: COR.falta_pendente }
       ];
-      document.getElementById("kpis").innerHTML = tiles.map(t =>
-        '<div class="comp-card' + (t.misto ? " misto" : "") + '" style="--cor:' + t.cor + '">' +
+      // Clicar num card abre a tela com os CT-e dele (como nos cards de prazo).
+      const el = document.getElementById("kpis");
+      el.innerHTML = tiles.map(t =>
+        '<button type="button" class="comp-card' + (t.misto ? " misto" : "") + '" data-grupo="' + t.k + '" style="--cor:' + t.cor + '">' +
         '<div class="label"><span class="d"></span>' + esc(t.label) + '</div>' +
-        '<div class="value">' + t.value + '</div><div class="sub">' + esc(t.sub) + '</div></div>'
+        '<div class="value">' + t.value + '</div><div class="sub">' + esc(t.sub) + '</div></button>'
       ).join("");
+      el.querySelectorAll(".comp-card").forEach(b => b.addEventListener("click", () => {
+        location.hash = "situacao/" + b.dataset.grupo;
+      }));
     }
 
     function contarAlertas(rows) {
@@ -696,7 +701,7 @@
     function renderBusca() {
       const sec = document.getElementById("busca-sec");
       const q = state.search;
-      if (!q || nivelAberto()) { sec.hidden = true; return; }
+      if (!q || vistaAberta()) { sec.hidden = true; return; }
       sec.hidden = false;
       const achados = buscar(q);
       const mostrar = achados.slice(0, MAX_BUSCA);
@@ -725,68 +730,121 @@
       bindBotoesTrat(corpo, mostrar);
     }
 
-    // Depois de lançar/apagar uma tratativa: atualiza a busca e a tela do
-    // nível (mantendo abertos os clientes que estavam abertos).
+    // Depois de lançar/apagar uma tratativa: atualiza a busca e a tela de
+    // lista aberta (mantendo abertos os clientes que estavam abertos).
     function atualizarListas() {
       renderBusca();
-      if (nivelAberto()) renderVistaPrazo();
+      if (vistaAberta()) renderVista();
     }
 
-    // ---- tela "#prazo/<nível>": CT-e e NF daquele nível, por cliente ----
-    // Respeita os filtros do topo (período, tomador, filial, busca); o
-    // botão Voltar (ou o voltar do navegador) retorna à visão geral.
+    // ---- telas de lista: "#prazo/<nível>" (cards de prazo) e
+    // "#situacao/<grupo>" (cards de totais) -- CT-e e NF agrupados por
+    // cliente, com a tratativa de cada um. Respeitam os filtros do topo
+    // (período, tomador, filial, busca); o botão Voltar (ou o voltar do
+    // navegador) retorna à visão geral.
     const DESCRICAO_ALERTA = {
       no_prazo: "falta mais de 1 dia útil para vencer",
       alerta: "vence hoje ou no próximo dia útil",
       vencido: "até " + ALERTA_DIAS_CRITICO + " dias úteis de atraso",
       critico: "mais de " + ALERTA_DIAS_CRITICO + " dias úteis de atraso"
     };
-    let vpBusca = "";
-    let vpLinhas = [];
-    const vpAbertos = new Set();  // clientes abertos na tela do nível
-    let vpNivelAnterior = null;
+    const GRUPOS_SIT = ["total", "com", "faltam", "entregues", "pendentes"];
+    const SIT = {
+      total: { rotulo: "Total de CT-e", cor: "var(--text-muted)", filtro: () => true, desc: "todos os CT-e do período" },
+      com: { rotulo: "Com comprovante", cor: COR.com, filtro: r => r.situacao === "com", desc: "comprovante lançado no GW" },
+      faltam: { rotulo: "Faltam comprovante", cor: COR.falta_entregue, misto: true, filtro: r => r.situacao !== "com", desc: "entregues sem comprovante + ainda não entregues" },
+      entregues: { rotulo: "Entregues sem comprovante", cor: COR.falta_entregue, filtro: r => r.situacao === "falta_entregue", desc: "já entregues, comprovante ainda não lançado" },
+      pendentes: { rotulo: "Ainda não entregues", cor: COR.falta_pendente, filtro: r => r.situacao === "falta_pendente", desc: "carga ainda não chegou ao destino" }
+    };
 
-    function nivelAberto() {
-      const m = /^#prazo\/(\w+)$/.exec(location.hash);
-      return m && ALERTAS.includes(m[1]) ? m[1] : null;
+    // Qual tela de lista está aberta (pelo endereço), ou null na visão geral.
+    function vistaAberta() {
+      const m = /^#(prazo|situacao)\/(\w+)$/.exec(location.hash);
+      if (!m) return null;
+      if (m[1] === "prazo" && ALERTAS.includes(m[2])) {
+        const k = m[2];
+        return {
+          id: "prazo/" + k, tipo: "prazo", chave: k, cor: COR_ALERTA[k],
+          titulo: "Prazo do comprovante: " + ROTULO_ALERTA[k], desc: DESCRICAO_ALERTA[k],
+          filtro: r => r.alerta === k
+        };
+      }
+      if (m[1] === "situacao" && SIT[m[2]]) {
+        const k = m[2], g = SIT[k];
+        return { id: "situacao/" + k, tipo: "situacao", chave: k, cor: g.cor, misto: g.misto, titulo: "Comprovantes: " + g.rotulo, desc: g.desc, filtro: g.filtro };
+      }
+      return null;
     }
 
+    let vpBusca = "";
+    let vpLinhas = [];
+    const vpAbertos = new Set();  // clientes abertos na tela de lista
+    let vpAnterior = null;
+
     function rotear() {
-      const nivel = nivelAberto();
-      document.getElementById("vista-geral").hidden = !!nivel;
-      document.getElementById("vista-prazo").hidden = !nivel;
-      document.getElementById("f-situacao").hidden = !!nivel;  // só faz sentido na visão geral
+      const v = vistaAberta();
+      document.getElementById("vista-geral").hidden = !!v;
+      document.getElementById("vista-prazo").hidden = !v;
+      document.getElementById("f-situacao").hidden = !!v;  // só faz sentido na visão geral
       hideTooltip();
       renderBusca();
-      if (nivel) renderVistaPrazo();
+      if (v) renderVista();
       window.scrollTo(0, 0);
     }
 
-    function linhasDoNivel(nivel) {
-      const q = vpBusca.trim().toLowerCase();
-      return getRecorte().filter(r => r.alerta === nivel && (!q ||
-        r.consignatario.toLowerCase().includes(q) ||
-        String(r.cte || "").toLowerCase().includes(q) ||
-        String(r.notas_fiscais || "").toLowerCase().includes(q)));
+    function ordenarLinhas(v, linhas) {
+      if (v.tipo === "situacao" && v.chave === "com") {
+        return linhas.sort((a, b) => String(b.data_comprovante || "").localeCompare(String(a.data_comprovante || "")));
+      }
+      // Mais graves primeiro (crítico > vencido > alerta > no prazo), maior
+      // atraso / vencimento mais antigo; depois os sem alerta, mais antigos.
+      return linhas.sort((a, b) =>
+        b.alerta_rank - a.alerta_rank || (b.atraso || 0) - (a.atraso || 0) ||
+        String(a.vencimento || "").localeCompare(String(b.vencimento || "")) ||
+        String(a.emissao || "").localeCompare(String(b.emissao || "")));
     }
 
-    function renderVistaPrazo() {
-      const nivel = nivelAberto();
-      if (!nivel) return;
+    function resumoGrupo(v, rows) {
+      if (v.tipo === "prazo") {
+        return v.chave === "vencido" || v.chave === "critico"
+          ? "maior atraso: " + fmtN(rows[0].atraso || 0) + (rows[0].atraso === 1 ? " dia útil" : " dias úteis")
+          : "próximo vencimento: " + fmtDate(rows.reduce((m, r) => (!m || r.vencimento < m ? r.vencimento : m), ""));
+      }
+      if (v.chave === "com") return "último comprovante: " + fmtDate(rows[0].data_comprovante);
+      const c = contar(rows), a = contarAlertas(rows);
+      const partes = [];
+      if (v.chave === "total") partes.push(fmtN(c.com) + " com comprovante", fmtN(rows.length - c.com) + " faltando");
+      if (a.critico) partes.push(fmtN(a.critico) + " crítico");
+      if (a.vencido) partes.push(fmtN(a.vencido) + " vencido");
+      if (!partes.length) partes.push("emissão mais antiga: " + fmtDate(rows.reduce((m, r) => (!m || (r.emissao && r.emissao < m) ? r.emissao : m), "")));
+      return partes.join(" · ");
+    }
+
+    function renderVista() {
+      const v = vistaAberta();
+      if (!v) return;
       const recorte = getRecorte();
-      const c = contarAlertas(recorte);
-      const cor = COR_ALERTA[nivel];
 
       document.getElementById("vp-titulo").innerHTML =
-        '<span class="comp-vp-dot" style="background:' + cor + '"></span>Prazo do comprovante: ' + esc(ROTULO_ALERTA[nivel]);
-      document.getElementById("vp-abas").innerHTML = ALERTAS.map(k =>
-        '<a href="#prazo/' + k + '" class="comp-vp-aba' + (k === nivel ? " ativa" : "") + '" style="--cor:' + COR_ALERTA[k] + '">' +
-        '<span class="d"></span>' + esc(ROTULO_ALERTA[k]) + ' <strong>' + fmtN(c[k]) + '</strong></a>'
-      ).join("");
+        '<span class="comp-vp-dot' + (v.misto ? " misto" : "") + '" style="background:' + v.cor + '"></span>' + esc(v.titulo);
+      if (v.tipo === "prazo") {
+        const c = contarAlertas(recorte);
+        document.getElementById("vp-abas").innerHTML = ALERTAS.map(k =>
+          '<a href="#prazo/' + k + '" class="comp-vp-aba' + (k === v.chave ? " ativa" : "") + '" style="--cor:' + COR_ALERTA[k] + '">' +
+          '<span class="d"></span>' + esc(ROTULO_ALERTA[k]) + ' <strong>' + fmtN(c[k]) + '</strong></a>'
+        ).join("");
+      } else {
+        document.getElementById("vp-abas").innerHTML = GRUPOS_SIT.map(k =>
+          '<a href="#situacao/' + k + '" class="comp-vp-aba' + (k === v.chave ? " ativa" : "") + (SIT[k].misto ? " misto" : "") + '" style="--cor:' + SIT[k].cor + '">' +
+          '<span class="d"></span>' + esc(SIT[k].rotulo) + ' <strong>' + fmtN(recorte.filter(SIT[k].filtro).length) + '</strong></a>'
+        ).join("");
+      }
 
-      // Mais graves primeiro: maior atraso / vencimento mais antigo.
-      const linhas = linhasDoNivel(nivel).sort((a, b) =>
-        (b.atraso || 0) - (a.atraso || 0) || String(a.vencimento || "").localeCompare(String(b.vencimento || "")));
+      const q = vpBusca.trim().toLowerCase();
+      const linhas = ordenarLinhas(v, recorte.filter(r => v.filtro(r) && (!q ||
+        r.consignatario.toLowerCase().includes(q) ||
+        String(r.cte || "").toLowerCase().includes(q) ||
+        String(r.notas_fiscais || "").toLowerCase().includes(q))));
       vpLinhas = linhas;
       const grupos = new Map();
       linhas.forEach(r => {
@@ -796,37 +854,39 @@
       const ordem = Array.from(grupos.entries()).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], "pt-BR"));
 
       document.getElementById("vp-sub").textContent =
-        fmtN(linhas.length) + " CT-e de " + fmtN(ordem.length) + (ordem.length === 1 ? " cliente" : " clientes") +
-        " · " + DESCRICAO_ALERTA[nivel];
+        fmtN(linhas.length) + " CT-e de " + fmtN(ordem.length) + (ordem.length === 1 ? " cliente" : " clientes") + " · " + v.desc;
 
       const lista = document.getElementById("vp-lista");
       if (!linhas.length) {
-        lista.innerHTML = '<div class="empty-state">Nenhum CT-e neste nível para os filtros atuais.</div>';
+        lista.innerHTML = '<div class="empty-state">Nenhum CT-e para os filtros atuais.</div>';
         return;
       }
       // Clientes vêm recolhidos -- a tabela de cada um só é montada quando
-      // ele é aberto (o nível crítico pode ter milhares de CT-e). Com busca
-      // digitada, os clientes encontrados já abrem.
-      if (vpNivelAnterior !== nivel) { vpAbertos.clear(); vpNivelAnterior = nivel; }
-      const comBusca = !!vpBusca.trim();
+      // ele é aberto (pode haver milhares de CT-e). Com busca digitada, os
+      // clientes encontrados já abrem.
+      if (vpAnterior !== v.id) { vpAbertos.clear(); vpAnterior = v.id; }
+      const comBusca = !!q;
       lista.innerHTML =
         '<div class="comp-vp-acoes"><span class="reset-link" data-acao="abrir">Expandir todos</span>' +
         '<span class="reset-link" data-acao="fechar">Recolher todos</span></div>' +
         ordem.map(([nome, rows], i) => {
-          const resumo = nivel === "vencido" || nivel === "critico"
-            ? "maior atraso: " + fmtN(rows[0].atraso || 0) + (rows[0].atraso === 1 ? " dia útil" : " dias úteis")
-            : "próximo vencimento: " + fmtDate(rows.reduce((m, r) => (!m || r.vencimento < m ? r.vencimento : m), ""));
           const ct = contarTrat(rows);
           const trat = [ct.andamento ? fmtN(ct.andamento) + " em andamento" : "", ct.resolvido ? fmtN(ct.resolvido) + " resolvido(s)" : ""]
             .filter(Boolean).join(" · ");
-          return '<details class="comp-pend comp-vp-grupo" data-i="' + i + '" style="border-left-color:' + cor + '"' +
+          return '<details class="comp-pend comp-vp-grupo" data-i="' + i + '" style="border-left-color:' + v.cor + '"' +
             (comBusca || vpAbertos.has(nome) ? " open" : "") + '>' +
             '<summary class="comp-pend-head"><span class="comp-vp-seta">▸</span><strong>' + esc(nome) + '</strong>' +
-            '<span class="comp-vp-qtd" style="--cor:' + cor + '">' + fmtN(rows.length) + ' CT-e</span>' +
-            '<span class="comp-de">' + esc(resumo) + '</span>' +
+            '<span class="comp-vp-qtd" style="--cor:' + v.cor + '">' + fmtN(rows.length) + ' CT-e</span>' +
+            '<span class="comp-de">' + esc(resumoGrupo(v, rows)) + '</span>' +
             (trat ? '<span class="comp-vp-trat">' + esc(trat) + '</span>' : "") + '</summary>' +
             '<div class="comp-vp-corpo"></div></details>';
         }).join("");
+
+      // Na tela de prazo a coluna é o vencimento (o comprovante sempre falta);
+      // nas de situação, a data do comprovante.
+      const colData = v.tipo === "prazo"
+        ? { th: "Vencimento", td: r => fmtDate(r.vencimento) }
+        : { th: "Comprovante", td: r => r.data_comprovante ? fmtDate(r.data_comprovante) : '<span class="flag-no">Falta</span>' };
 
       function preencher(det) {
         const corpo = det.querySelector(".comp-vp-corpo");
@@ -834,7 +894,7 @@
         const rows = ordem[parseInt(det.dataset.i, 10)][1];
         corpo.innerHTML =
           '<div class="comp-pend-scroll comp-vp-scroll"><table class="detail comp-pend-table"><thead><tr>' +
-          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Vencimento</th><th>Prazo do comprovante</th><th>Tratativa</th>' +
+          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>' + colData.th + '</th><th>Prazo do comprovante</th><th>Tratativa</th>' +
           '</tr></thead><tbody>' + rows.map((r, idx) =>
             '<tr>' +
             '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
@@ -843,8 +903,8 @@
             '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 30)) + '</td>' +
             '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
             '<td>' + fmtDate(r.data_baixa) + '</td>' +
-            '<td>' + fmtDate(r.vencimento) + '</td>' +
-            '<td data-prazo="' + idx + '">' + pillPrazo(r) + '</td>' +
+            '<td>' + colData.td(r) + '</td>' +
+            '<td data-prazo="' + idx + '">' + (pillPrazo(r) || '<span class="bip-muted">—</span>') + '</td>' +
             '<td>' + celulaTrat(r, idx) + '</td>' +
             '</tr>'
           ).join("") + '</tbody></table></div>';
@@ -874,21 +934,21 @@
       rotear();
     });
     document.getElementById("vp-search").addEventListener("input", function () {
-      vpBusca = this.value; renderVistaPrazo();
+      vpBusca = this.value; renderVista();
     });
     document.getElementById("vp-export").addEventListener("click", () => {
-      const nivel = nivelAberto();
-      const lines = [["Cliente", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega",
+      const v = vistaAberta();
+      const lines = [["Cliente", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Data comprovante", "Situacao",
         "Prazo (dias uteis)", "Vencimento", "Alerta", "Detalhe do prazo", "Tratativa", "Ultima tratativa", "Responsavel", "Data da tratativa"].join(";")];
       vpLinhas.forEach(r => {
         const t = ultimaTrat(r.id_cte);
         lines.push([csvSafe(r.consignatario), r.cte, r.serie || "", csvSafe(r.notas_fiscais || ""), r.emissao || "",
-          csvSafe(r.destinatario), csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "",
-          r.prazo_comprovante_dias, r.vencimento || "", ROTULO_ALERTA[r.alerta], csvSafe(textoPrazo(r)),
+          csvSafe(r.destinatario), csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "", r.data_comprovante || "", ROTULO[r.situacao],
+          r.situacao === "falta_entregue" ? r.prazo_comprovante_dias : "", r.vencimento || "", ROTULO_ALERTA[r.alerta] || "", csvSafe(textoPrazo(r)),
           t ? ROTULO_TRAT[t.situacao] : "", csvSafe(t ? t.texto : ""), csvSafe(t ? t.responsavel || "" : ""),
           t ? fmtDataHora(t.criado_em) : ""].join(";"));
       });
-      baixarCsv(lines, "comprovantes_" + nivel + ".csv");
+      baixarCsv(lines, "comprovantes_" + v.id.replace("/", "_") + ".csv");
     });
 
     function render() {
@@ -900,7 +960,7 @@
       renderTrend(visiveis);
       renderFiliais(recorte);
       renderBusca();
-      if (nivelAberto()) renderVistaPrazo();
+      if (vistaAberta()) renderVista();
     }
 
     window.addEventListener("hashchange", rotear);
