@@ -46,13 +46,24 @@
         '<td>' + esc(u.login) + '</td>' +
         '<td title="' + esc(u.empresas.join("\n")) + '">' + emp + '</td>' +
         '<td>' + (u.ativo ? '<span class="bip-tag faturado">Ativo</span>' : '<span class="bip-tag">Desativado</span>') +
-          (u.ativo && u.trocar_senha ? ' <span class="bip-tag" title="Ainda não trocou a senha definida por você">senha provisória</span>' : "") + '</td>' +
-        '<td class="bip-acoes"><button type="button" class="btn" data-editar="' + i + '">Editar</button> ' +
+          (u.ativo && u.trocar_senha ? ' <span class="bip-tag" title="Ainda não trocou a senha definida por você">senha provisória</span>' : "") +
+          (u.bloqueado_ate ? ' <span class="bip-tag usr-bloqueado" title="Errou a senha várias vezes">bloqueado até ' +
+            new Date(u.bloqueado_ate).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + '</span>' : "") + '</td>' +
+        '<td class="bip-acoes">' + (u.bloqueado_ate ? '<button type="button" class="btn" data-desbloquear="' + i + '">Desbloquear</button> ' : "") +
+        '<button type="button" class="btn" data-editar="' + i + '">Editar</button> ' +
         '<button type="button" class="btn" data-ativar="' + i + '">' + (u.ativo ? "Desativar" : "Reativar") + '</button></td>' +
         '</tr>';
     }).join("");
     tbody.querySelectorAll("[data-editar]").forEach(b => b.addEventListener("click", () => abrir(usuarios[+b.dataset.editar])));
     tbody.querySelectorAll("[data-ativar]").forEach(b => b.addEventListener("click", () => alternarAtivo(usuarios[+b.dataset.ativar])));
+    tbody.querySelectorAll("[data-desbloquear]").forEach(b => b.addEventListener("click", () => desbloquear(usuarios[+b.dataset.desbloquear])));
+  }
+
+  async function desbloquear(u) {
+    try {
+      await api("/api/usuarios/" + u.id + "/desbloquear", { method: "POST" });
+      await carregarUsuarios();
+    } catch (e) { alert(e.message); }
   }
 
   async function alternarAtivo(u) {

@@ -130,6 +130,19 @@ class Usuario(Base):
     atualizado_em = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
 
+class TentativaLogin(Base):
+    """Contador de senhas erradas por chave ("usuario:<login>", "geral:<ip>",
+    "ip:<ip>") -- ver app/bloqueio_login.py."""
+
+    __tablename__ = "tentativas_login"
+
+    id = Column(Integer, primary_key=True)
+    chave = Column(String(120), unique=True, nullable=False, index=True)
+    falhas = Column(Integer, default=0, nullable=False)
+    primeira_falha = Column(DateTime, nullable=True)
+    bloqueado_ate = Column(DateTime, nullable=True)
+
+
 class Meta(Base):
     __tablename__ = "meta"
 

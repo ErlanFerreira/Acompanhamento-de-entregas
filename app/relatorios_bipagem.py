@@ -24,6 +24,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from . import chave_cte
+from .escopo import carga_visivel, filtro_cargas
 from .filiais import dados_filial, fmt_cnpj
 from .models import Bipagem, Carga, ProtocoloFatura
 
@@ -110,9 +111,12 @@ _LINHA_INICIAL = 9
 _NUM_COLUNAS = 17  # A..Q
 
 
-def gerar_controle_comprovantes(db: Session, tomador: str, ano: int, mes: int, responsavel: str) -> bytes:
+def gerar_controle_comprovantes(
+    db: Session, tomador: str, ano: int, mes: int, responsavel: str, empresas: set[str] | None = None
+) -> bytes:
     """`tomador` é o `id` de `tomadores_disponiveis`: raiz do CNPJ (8
-    dígitos) ou "nome:<nome>" pra CT-e ainda sem CNPJ do tomador."""
+    dígitos) ou "nome:<nome>" pra CT-e ainda sem CNPJ do tomador. Com
+    `empresas` (analista), só entram os CT-e dessas empresas."""
     inicio = datetime.date(ano, mes, 1)
     fim = datetime.date(ano + (mes == 12), mes % 12 + 1, 1)
     if tomador.startswith(PREFIXO_TOMADOR_NOME):
@@ -131,16 +135,14 @@ def gerar_controle_comprovantes(db: Session, tomador: str, ano: int, mes: int, r
             Carga.cnpj_consignatario.like(f"{tomador}%"),
             and_(Carga.cnpj_consignatario.is_(None), Carga.consignatario.in_(nomes)),
         )
-    cargas = (
-        db.query(Carga)
-        .filter(
-            filtro_tomador,
-            Carga.emissao >= inicio.isoformat(),
-            Carga.emissao < fim.isoformat(),
-        )
-        .order_by(Carga.emissao.asc(), Carga.cte.asc())
-        .all()
+    q = db.query(Carga).filter(
+        filtro_tomador,
+        Carga.emissao >= inicio.isoformat(),
+        Carga.emissao < fim.isoformat(),
     )
+    if empresas is not None:
+        q = q.filter(filtro_cargas(empresas))
+    cargas = q.order_by(Carga.emissao.asc(), Carga.cte.asc()).all()
 
     # Primeiro bip de cada CT-e -- (filial, número) -> bip.
     bips: dict[tuple[str, int], Bipagem] = {}
@@ -209,16 +211,16 @@ def gerar_controle_comprovantes(db: Session, tomador: str, ano: int, mes: int, r
 PREFIXO_TOMADOR_NOME = "nome:"
 
 
-def tomadores_disponiveis(db: Session) -> list[dict]:
+def tomadores_disponiveis(db: Session, empresas: set[str] | None = None) -> list[dict]:
     """Tomadores com CT-e na base, pro seletor do controle mensal --
     agrupados pela raiz do CNPJ (matriz + filiais do parceiro). CT-e ainda
     sem CNPJ do tomador (sincronizados antes dessa coluna existir) entram
-    pelo nome, com `id` "nome:<nome>"."""
-    linhas = (
-        db.query(Carga.cnpj_consignatario, Carga.consignatario, func.count())
-        .group_by(Carga.cnpj_consignatario, Carga.consignatario)
-        .all()
-    )
+    pelo nome, com `id` "nome:<nome>". Com `empresas` (analista), só os
+    tomadores de CT-e dessas empresas."""
+    q = db.query(Carga.cnpj_consignatario, Carga.consignatario, func.count())
+    if empresas is not None:
+        q = q.filter(filtro_cargas(empresas))
+    linhas = q.group_by(Carga.cnpj_consignatario, Carga.consignatario).all()
     grupos: dict[str, dict] = {}
     nomes_com_cnpj: set[str] = set()
     for cnpj, nome, total in linhas:
@@ -405,7 +407,7 @@ def id_tomador(carga: Carga | None) -> str:
     return SEM_TOMADOR
 
 
-def _pendentes_por_tomador(db: Session) -> dict[str, dict]:
+def _pendentes_por_tomador(db: Session, empresas: set[str] | None = None) -> dict[str, dict]:
     grupos: dict[str, dict] = {}
     bips = (
         db.query(Bipagem)
@@ -419,6 +421,8 @@ def _pendentes_por_tomador(db: Session) -> dict[str, dict]:
         except chave_cte.ChaveInvalida:
             continue
         carga = buscar_carga(db, dados)
+        if not carga_visivel(carga, empresas):
+            continue
         tid = id_tomador(carga)
         nome = (carga.consignatario if carga else None) or "TOMADOR NÃO IDENTIFICADO (fora da base)"
         g = grupos.setdefault(tid, {
@@ -433,19 +437,21 @@ def _pendentes_por_tomador(db: Session) -> dict[str, dict]:
     return grupos
 
 
-def faturas_pendentes(db: Session) -> list[dict]:
-    """CT-e bipados que ainda não entraram em nenhum protocolo, por tomador."""
-    grupos = _pendentes_por_tomador(db)
+def faturas_pendentes(db: Session, empresas: set[str] | None = None) -> list[dict]:
+    """CT-e bipados que ainda não entraram em nenhum protocolo, por tomador
+    (com `empresas`, só os CT-e dessas empresas)."""
+    grupos = _pendentes_por_tomador(db, empresas)
     return sorted(
         ({k: v for k, v in g.items() if k != "bips"} for g in grupos.values()),
         key=lambda g: (g["nome"] or "").upper(),
     )
 
 
-def criar_protocolo_faturas(db: Session, tomador: str) -> ProtocoloFatura | None:
+def criar_protocolo_faturas(db: Session, tomador: str, empresas: set[str] | None = None) -> ProtocoloFatura | None:
     """Gera o protocolo com os CT-e pendentes do tomador e dá baixa neles.
-    Retorna `None` se não houver pendentes."""
-    grupo = _pendentes_por_tomador(db).get(tomador)
+    Com `empresas` (analista), só leva os CT-e dessas empresas. Retorna
+    `None` se não houver pendentes."""
+    grupo = _pendentes_por_tomador(db, empresas).get(tomador)
     if not grupo:
         return None
 

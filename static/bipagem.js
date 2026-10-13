@@ -23,7 +23,11 @@
   // Lista da tela (guardada no navegador pra não perder a conferência se a
   // página recarregar). O registro que vale para os relatórios fica no
   // servidor -- o mesmo bip serve pro controle e pro protocolo.
-  const STORAGE_KEY = "bipagem:itens";
+  // Cada analista tem a sua lista (o navegador pode ser compartilhado e cada
+  // um só pode ver CT-e das próprias empresas); o supervisor usa a de sempre.
+  const bipRoot = document.getElementById("bip-root");
+  const ANALISTA = bipRoot ? bipRoot.dataset.analista : "";
+  const STORAGE_KEY = ANALISTA ? "bipagem:itens@" + ANALISTA : "bipagem:itens";
   let itens = [];
 
   function lerStorage(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -35,6 +39,7 @@
     // Junta as listas antigas, de quando comprovantes e faturas eram
     // bipados separadamente.
     const lista = lerLista(STORAGE_KEY);
+    if (ANALISTA) return lista;
     ["bipagem:itens:comprovante", "bipagem:itens:fatura"].forEach(function (k) {
       lerLista(k).forEach(function (x) {
         if (!lista.some(function (y) { return y.chave === x.chave; })) lista.push(x);

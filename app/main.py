@@ -21,6 +21,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem
+from . import bloqueio_login, escopo
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
 from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura, TratativaComprovante, Usuario
@@ -96,25 +97,31 @@ def login_page(request: Request):
 
 @app.post("/login", response_class=HTMLResponse)
 def login_submit(request: Request, senha: str = Form(...), usuario: str = Form(""), db: Session = Depends(get_db)):
-    """Sem usuário: senha geral (supervisor). Com usuário: login do analista."""
-    login = usuario.strip().lower()
+    """Sem usuário: senha geral (supervisor). Com usuário: login do analista.
+    Várias senhas erradas bloqueiam o login por um tempo (ver bloqueio_login)."""
+    login = usuario.strip().lower()[:40]
+    chaves = bloqueio_login.chaves_tentativa(request, login)
+
+    def recusar(erro: str, status: int = 401):
+        return templates.TemplateResponse("login.html", {"request": request, "error": erro, "usuario": usuario}, status_code=status)
+
+    minutos = bloqueio_login.minutos_bloqueado(db, chaves)
+    if minutos:
+        dica = " ou peça ao supervisor para desbloquear" if login else ""
+        return recusar(f"Muitas tentativas com senha errada. Acesso bloqueado por {minutos} minuto(s) -- "
+                       f"tente de novo depois{dica}.", 429)
     if login:
         u = db.query(Usuario).filter(Usuario.login == login).first()
         if not u or not u.ativo or not conferir_senha(senha, u.senha_hash):
-            return templates.TemplateResponse(
-                "login.html",
-                {"request": request, "error": "Usuário ou senha incorretos.", "usuario": usuario},
-                status_code=401,
-            )
+            bloqueio_login.registrar_falha(db, chaves)
+            return recusar("Usuário ou senha incorretos.")
         token = create_session_cookie(VIA_USUARIO, u.id)
     else:
         if not config.PAINEL_SENHA or senha != config.PAINEL_SENHA:
-            return templates.TemplateResponse(
-                "login.html",
-                {"request": request, "error": "Senha incorreta."},
-                status_code=401,
-            )
+            bloqueio_login.registrar_falha(db, chaves)
+            return recusar("Senha incorreta.")
         token = create_session_cookie(VIA_SENHA)
+    bloqueio_login.limpar(db, chaves[:1])  # zera o contador do login/senha usado (o do endereço vence sozinho)
     resp = RedirectResponse(url="/painel", status_code=303)
     resp.set_cookie(COOKIE_NAME, token, max_age=COOKIE_MAX_AGE, httponly=True, samesite="lax")
     return resp
@@ -151,8 +158,13 @@ def trocar_senha_submit(
     u = db.get(Usuario, analista["id"])
     # Na troca obrigatória a pessoa acabou de entrar com a senha provisória;
     # na opcional, confirma a atual (sessão aberta num computador alheio).
-    if not precisa_trocar_senha(request) and not conferir_senha(atual, u.senha_hash):
-        return _form_troca(request, "Senha atual incorreta.", 400)
+    if not precisa_trocar_senha(request):
+        chaves = bloqueio_login.chaves_tentativa(request, u.login)
+        if bloqueio_login.minutos_bloqueado(db, chaves):
+            return _form_troca(request, "Muitas tentativas com senha errada. Tente de novo mais tarde.", 429)
+        if not conferir_senha(atual, u.senha_hash):
+            bloqueio_login.registrar_falha(db, chaves)
+            return _form_troca(request, "Senha atual incorreta.", 400)
     if len(nova) < SENHA_MIN:
         return _form_troca(request, f"A nova senha deve ter pelo menos {SENHA_MIN} caracteres.", 400)
     if nova != confirmar:
@@ -242,23 +254,14 @@ def _row_to_dict(r: Carga) -> dict:
     }
 
 
-def _nome_empresa(coluna):
-    """Nome da empresa como é comparado com a lista do analista."""
-    return func.upper(func.trim(coluna))
-
-
-def _filtro_empresas(empresas: set[str]):
-    """CT-e em que alguma das empresas do analista é tomador ou remetente."""
-    lista = list(empresas) or [""]
-    return or_(_nome_empresa(Carga.consignatario).in_(lista), _nome_empresa(Carga.remetente).in_(lista))
+# Escopo do analista (ver app/escopo.py): CT-e em que alguma das empresas
+# dele é tomador ou remetente.
+_nome_empresa = escopo.nome_empresa
+_filtro_empresas = escopo.filtro_cargas
 
 
 def _carga_no_escopo(request: Request, carga: Carga | None) -> bool:
-    empresas = escopo_empresas(request)
-    if carga is None or empresas is None:
-        return carga is not None
-    nomes = {(carga.consignatario or "").strip().upper(), (carga.remetente or "").strip().upper()}
-    return bool(nomes & empresas)
+    return carga is not None and escopo.carga_visivel(carga, escopo_empresas(request))
 
 
 @app.get("/api/cargas", dependencies=[Depends(require_auth_api)])
@@ -386,7 +389,7 @@ def usuarios_page(request: Request):
     return templates.TemplateResponse("usuarios.html", {"request": request, "active": "usuarios"})
 
 
-def _usuario_to_dict(u: Usuario) -> dict:
+def _usuario_to_dict(u: Usuario, bloqueado_ate: datetime.datetime | None = None) -> dict:
     return {
         "id": u.id,
         "nome": u.nome,
@@ -395,13 +398,25 @@ def _usuario_to_dict(u: Usuario) -> dict:
         "trocar_senha": bool(u.trocar_senha),
         "empresas": json.loads(u.empresas or "[]"),
         "criado_em": u.criado_em.isoformat() + "Z" if u.criado_em else None,
+        "bloqueado_ate": bloqueado_ate.isoformat() + "Z" if bloqueado_ate else None,
     }
 
 
 @app.get("/api/usuarios", dependencies=[Depends(require_supervisor_api)])
 def api_usuarios(db: Session = Depends(get_db)):
     rows = db.query(Usuario).order_by(func.lower(Usuario.nome)).all()
-    return {"usuarios": [_usuario_to_dict(u) for u in rows]}
+    bloqueios = bloqueio_login.bloqueios_de_usuarios(db)
+    return {"usuarios": [_usuario_to_dict(u, bloqueios.get(u.login)) for u in rows]}
+
+
+@app.post("/api/usuarios/{usuario_id}/desbloquear", dependencies=[Depends(require_supervisor_api)])
+def api_usuarios_desbloquear(usuario_id: int, db: Session = Depends(get_db)):
+    """Libera um analista bloqueado por senhas erradas antes do tempo."""
+    u = db.get(Usuario, usuario_id)
+    if not u:
+        return JSONResponse({"erro": "Analista não encontrado."}, status_code=404)
+    bloqueio_login.limpar(db, [f"usuario:{u.login}"])
+    return _usuario_to_dict(u)
 
 
 @app.get("/api/empresas", dependencies=[Depends(require_supervisor_api)])
@@ -469,6 +484,7 @@ def api_usuarios_editar(usuario_id: int, payload: dict, db: Session = Depends(ge
         # no próximo acesso.
         u.senha_hash = hash_senha(dados["senha"])
         u.trocar_senha = True
+        bloqueio_login.limpar(db, [f"usuario:{u.login}"])  # senha nova também desbloqueia
     if "ativo" in payload:
         u.ativo = bool(payload["ativo"])
     db.commit()
@@ -521,13 +537,19 @@ def bipagem_page(request: Request):
     return templates.TemplateResponse("bipagem.html", {"request": request, "active": "bipagem"})
 
 
-def _resultado_bipagem(db: Session, leitura: str) -> dict:
+def _resultado_bipagem(db: Session, leitura: str, empresas: set[str] | None = None) -> dict:
     try:
         dados = chave_cte.decodificar(leitura)
     except chave_cte.ChaveInvalida as exc:
         return {"ok": False, "leitura": leitura, "erro": str(exc)}
 
     carga = relatorios_bipagem.buscar_carga(db, dados)
+    if not escopo.carga_visivel(carga, empresas):
+        # Analista só bipa CT-e das empresas dele -- CT-e ainda fora da base
+        # também fica de fora (não dá pra saber de quem é).
+        erro = ("Esse CT-e não é de nenhuma das suas empresas." if carga
+                else "CT-e ainda não está na base sincronizada -- não dá pra confirmar se é de uma das suas empresas.")
+        return {"ok": False, "leitura": leitura, "erro": erro}
     resultado = {"ok": True, **dados, "encontrado": carga is not None}
     if carga:
         resultado.update({
@@ -548,11 +570,11 @@ def _resultado_bipagem(db: Session, leitura: str) -> dict:
 
 
 @app.post("/api/bipagem", dependencies=[Depends(require_auth_api)])
-def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
+def api_bipagem_registrar(request: Request, payload: dict, db: Session = Depends(get_db)):
     """Registra um bip -- o mesmo bip vale pro controle de comprovantes e
     pro protocolo de faturas. Repetir a mesma chave não cria outro registro:
     volta `duplicado` com a data do primeiro bip."""
-    resultado = _resultado_bipagem(db, str(payload.get("leitura") or ""))
+    resultado = _resultado_bipagem(db, str(payload.get("leitura") or ""), escopo_empresas(request))
     if not resultado["ok"]:
         return resultado
 
@@ -579,10 +601,13 @@ def api_bipagem_registrar(payload: dict, db: Session = Depends(get_db)):
 
 
 @app.delete("/api/bipagem", dependencies=[Depends(require_auth_api)])
-def api_bipagem_remover(chave: str, db: Session = Depends(get_db)):
+def api_bipagem_remover(request: Request, chave: str, db: Session = Depends(get_db)):
     """Desfaz um bip (ex: bipado por engano) -- no controle de comprovantes
     o CT-e volta a ficar sem data de envio. Não desfaz bip que já entrou num
     protocolo de faturas (desfaça o protocolo antes)."""
+    empresas = escopo_empresas(request)
+    if empresas is not None and not _resultado_bipagem(db, chave, empresas)["ok"]:
+        return JSONResponse({"erro": "CT-e não encontrado."}, status_code=404)
     faturado = (
         db.query(Bipagem.protocolo_id)
         .filter(Bipagem.chave == chave, Bipagem.protocolo_id.isnot(None))
@@ -607,12 +632,12 @@ def _xlsx_response(conteudo: bytes, nome: str) -> StreamingResponse:
 
 
 @app.get("/api/bipagem/tomadores", dependencies=[Depends(require_auth_api)])
-def api_bipagem_tomadores(db: Session = Depends(get_db)):
-    return {"tomadores": relatorios_bipagem.tomadores_disponiveis(db)}
+def api_bipagem_tomadores(request: Request, db: Session = Depends(get_db)):
+    return {"tomadores": relatorios_bipagem.tomadores_disponiveis(db, escopo_empresas(request))}
 
 
 @app.get("/api/bipagem/controle", dependencies=[Depends(require_auth_api)])
-def api_bipagem_controle(tomador: str, mes: str, responsavel: str = "", db: Session = Depends(get_db)):
+def api_bipagem_controle(request: Request, tomador: str, mes: str, responsavel: str = "", db: Session = Depends(get_db)):
     """Controle mensal de comprovantes (modelo "SETEMBRO - GUANABARA") --
     `tomador` é a raiz (8 dígitos) do CNPJ ou "nome:<nome>" (ver
     `tomadores_disponiveis`), `mes` no formato AAAA-MM."""
@@ -627,7 +652,10 @@ def api_bipagem_controle(tomador: str, mes: str, responsavel: str = "", db: Sess
     if not m or not 1 <= int(m.group(2)) <= 12 or not tomador_id:
         return JSONResponse({"erro": "Informe o tomador e o mês (AAAA-MM)."}, status_code=400)
     ano, mes_num = int(m.group(1)), int(m.group(2))
-    conteudo = relatorios_bipagem.gerar_controle_comprovantes(db, tomador_id, ano, mes_num, responsavel.strip())
+    empresas = escopo_empresas(request)
+    if empresas is not None and tomador_id not in {t["id"] for t in relatorios_bipagem.tomadores_disponiveis(db, empresas)}:
+        return JSONResponse({"erro": "Tomador fora das suas empresas."}, status_code=404)
+    conteudo = relatorios_bipagem.gerar_controle_comprovantes(db, tomador_id, ano, mes_num, responsavel.strip(), empresas)
     return _xlsx_response(conteudo, f"controle_comprovantes_{sufixo}_{mes}.xlsx")
 
 
@@ -643,35 +671,51 @@ def _protocolo_to_dict(p: ProtocoloFatura) -> dict:
 
 
 @app.get("/api/bipagem/faturas/pendentes", dependencies=[Depends(require_auth_api)])
-def api_faturas_pendentes(db: Session = Depends(get_db)):
+def api_faturas_pendentes(request: Request, db: Session = Depends(get_db)):
     """CT-e bipados que ainda não entraram em nenhum protocolo de faturas."""
-    return {"pendentes": relatorios_bipagem.faturas_pendentes(db)}
+    return {"pendentes": relatorios_bipagem.faturas_pendentes(db, escopo_empresas(request))}
 
 
 @app.post("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_auth_api)])
-def api_faturas_gerar_protocolo(payload: dict, db: Session = Depends(get_db)):
+def api_faturas_gerar_protocolo(request: Request, payload: dict, db: Session = Depends(get_db)):
     """Gera o protocolo de envio de faturas (modelo "ENVIO DE COMPROVANTE -
     PETROCARGAS") com os CT-e pendentes do tomador e dá baixa neles -- o
     próximo protocolo não leva de novo os mesmos comprovantes. O arquivo
     fica guardado; baixe por `/api/bipagem/faturas/protocolos/{id}/arquivo`."""
     tomador = str(payload.get("tomador") or "")
-    protocolo = relatorios_bipagem.criar_protocolo_faturas(db, tomador)
+    protocolo = relatorios_bipagem.criar_protocolo_faturas(db, tomador, escopo_empresas(request))
     if not protocolo:
         return JSONResponse({"erro": "Nenhum CT-e pendente de protocolo para esse tomador."}, status_code=404)
     chaves = [b.chave for b in db.query(Bipagem).filter(Bipagem.protocolo_id == protocolo.id)]
     return {**_protocolo_to_dict(protocolo), "chaves": chaves}
 
 
+def _protocolos_visiveis(db: Session, empresas: set[str]) -> set[int]:
+    """Protocolos com pelo menos um CT-e das empresas do analista."""
+    visiveis = escopo.ctes_visiveis(db, empresas)
+    bips = db.query(Bipagem.protocolo_id, Bipagem.cnpj_filial, Bipagem.numero).filter(Bipagem.protocolo_id.isnot(None))
+    return {pid for pid, filial, numero in bips if (filial, numero) in visiveis}
+
+
+def _protocolo_permitido(request: Request, db: Session, protocolo_id: int) -> bool:
+    empresas = escopo_empresas(request)
+    return empresas is None or protocolo_id in _protocolos_visiveis(db, empresas)
+
+
 @app.get("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_auth_api)])
-def api_faturas_protocolos(db: Session = Depends(get_db)):
-    protocolos = db.query(ProtocoloFatura).order_by(ProtocoloFatura.criado_em.desc()).limit(50).all()
+def api_faturas_protocolos(request: Request, db: Session = Depends(get_db)):
+    q = db.query(ProtocoloFatura)
+    empresas = escopo_empresas(request)
+    if empresas is not None:
+        q = q.filter(ProtocoloFatura.id.in_(_protocolos_visiveis(db, empresas) or {-1}))
+    protocolos = q.order_by(ProtocoloFatura.criado_em.desc()).limit(50).all()
     return {"protocolos": [_protocolo_to_dict(p) for p in protocolos]}
 
 
 @app.get("/api/bipagem/faturas/protocolos/{protocolo_id}/arquivo", dependencies=[Depends(require_auth_api)])
-def api_faturas_protocolo_arquivo(protocolo_id: int, db: Session = Depends(get_db)):
+def api_faturas_protocolo_arquivo(request: Request, protocolo_id: int, db: Session = Depends(get_db)):
     p = db.query(ProtocoloFatura).filter(ProtocoloFatura.id == protocolo_id).first()
-    if not p or not p.arquivo:
+    if not p or not p.arquivo or not _protocolo_permitido(request, db, protocolo_id):
         return JSONResponse({"erro": "Protocolo não encontrado."}, status_code=404)
     nome = "".join(c for c in (p.tomador_nome or "") if c.isalnum() or c == " ").strip().replace(" ", "_")[:40]
     data = relatorios_bipagem.data_br(p.criado_em).isoformat()
@@ -682,10 +726,10 @@ def api_faturas_protocolo_arquivo(protocolo_id: int, db: Session = Depends(get_d
 
 
 @app.delete("/api/bipagem/faturas/protocolos/{protocolo_id}", dependencies=[Depends(require_auth_api)])
-def api_faturas_desfazer_protocolo(protocolo_id: int, db: Session = Depends(get_db)):
+def api_faturas_desfazer_protocolo(request: Request, protocolo_id: int, db: Session = Depends(get_db)):
     """Desfaz um protocolo gerado por engano -- os CT-e dele voltam a ficar
     pendentes de protocolo."""
-    if not relatorios_bipagem.desfazer_protocolo(db, protocolo_id):
+    if not _protocolo_permitido(request, db, protocolo_id) or not relatorios_bipagem.desfazer_protocolo(db, protocolo_id):
         return JSONResponse({"erro": "Protocolo não encontrado."}, status_code=404)
     return {"ok": True}
 
@@ -709,14 +753,15 @@ _COLUNAS_BIPAGEM = [
 
 
 @app.post("/api/bipagem/exportar", dependencies=[Depends(require_auth_api)])
-def api_bipagem_exportar(payload: dict, db: Session = Depends(get_db)):
+def api_bipagem_exportar(request: Request, payload: dict, db: Session = Depends(get_db)):
     leituras = [str(x) for x in (payload.get("leituras") or [])][:2000]
+    empresas = escopo_empresas(request)
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Bipagem"
     ws.append([titulo for titulo, _ in _COLUNAS_BIPAGEM])
     for leitura in leituras:
-        r = _resultado_bipagem(db, leitura)
+        r = _resultado_bipagem(db, leitura, empresas)
         if not r["ok"]:
             linha = [None] * len(_COLUNAS_BIPAGEM)
             linha[0], linha[-2], linha[-1] = leitura, r["erro"], "Não"
