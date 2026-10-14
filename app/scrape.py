@@ -72,6 +72,16 @@ def _salvar_debug(page: Page, prefixo: str) -> None:
         logger.exception("Falha ao salvar debug de %s", prefixo)
 
 
+def _resumo_pagina(page: Page) -> str:
+    """URL + começo do texto visível da página, pra ir na mensagem de erro
+    (o que o portal está mostrando: aviso de sessão ativa, senha inválida...)."""
+    try:
+        texto = " ".join(page.inner_text("body", timeout=3000).split())[:200]
+        return f"[Página: {page.url} | {texto}]"
+    except Exception:
+        return f"[Página: {page.url}]"
+
+
 def _login(page: Page) -> None:
     if not config.PORTAL_EMAIL or not config.PORTAL_SENHA:
         raise ScrapeError("PORTAL_EMAIL e PORTAL_SENHA precisam estar configurados.")
@@ -121,7 +131,8 @@ def _login(page: Page) -> None:
         _salvar_debug(page, "login")
         raise ScrapeError(
             "Login no portal GW Sistemas não autenticou de verdade (a página redireciona, mas não "
-            "mostra o menu logado) -- confira se PORTAL_EMAIL/PORTAL_SENHA estão corretos."
+            "mostra o menu logado) -- confira se PORTAL_EMAIL/PORTAL_SENHA estão corretos, e se "
+            f"não há outra sessão aberta com esse login. {_resumo_pagina(page)}"
         )
 
 
