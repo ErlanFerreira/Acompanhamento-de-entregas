@@ -82,6 +82,14 @@ def _resumo_pagina(page: Page) -> str:
         return f"[Página: {page.url}]"
 
 
+def _menu_principal_visivel(page: Page) -> bool:
+    try:
+        texto = page.inner_text("body", timeout=3000)
+    except Exception:
+        return False
+    return "Cadastros" in texto and "Relatórios" in texto
+
+
 def _login(page: Page) -> None:
     if not config.PORTAL_EMAIL or not config.PORTAL_SENHA:
         raise ScrapeError("PORTAL_EMAIL e PORTAL_SENHA precisam estar configurados.")
@@ -128,6 +136,12 @@ def _login(page: Page) -> None:
     try:
         page.wait_for_selector(".logout-item", timeout=10_000)
     except PlaywrightTimeoutError:
+        # O portal pode mudar o layout do menu (ou cobrir a tela com um
+        # aviso) sem o "Sair" ficar visível -- o texto do menu principal
+        # também só existe logado, então vale como confirmação.
+        if _menu_principal_visivel(page):
+            logger.warning("Login ok, mas o botão Sair não apareceu -- seguindo mesmo assim.")
+            return
         _salvar_debug(page, "login")
         raise ScrapeError(
             "Login no portal GW Sistemas não autenticou de verdade (a página redireciona, mas não "
