@@ -46,6 +46,7 @@
     <span class="reset-link" id="f-reset">Limpar filtros</span>
   </section>
 
+  <div id="vista-geral">
   <section class="kpis" id="kpis"></section>
 
   <section class="grid-2">
@@ -118,6 +119,24 @@
     </div>
     <div class="pagination" id="pagination"></div>
   </section>
+  </div>
+
+  <div id="vista-lista" hidden>
+    <section class="table-section comp-vista-prazo">
+      <div class="table-toolbar">
+        <a href="#" class="btn" id="vl-voltar">← Voltar</a>
+        <div>
+          <h2 id="vl-titulo"></h2>
+          <div class="chart-subtitle" id="vl-sub" style="margin:2px 0 0;"></div>
+        </div>
+        <div style="flex:1"></div>
+        <input type="text" id="vl-search" placeholder="Filtrar cliente, CT-e ou NF…">
+        <button class="btn" id="vl-export" type="button">Baixar CSV</button>
+      </div>
+      <div class="comp-vp-abas" id="vl-abas"></div>
+      <div id="vl-lista"></div>
+    </section>
+  </div>
 
   <footer class="app-footer">
     <strong>Dados ao vivo</strong> — sincronizados automaticamente com o relatório "Pendências" do sistema GW Sistemas várias vezes ao dia. Use "Atualizar agora" para disparar uma sincronização (leva 1-2 minutos).

@@ -181,16 +181,195 @@
       const pctNoPrazo = entreguesTotal ? entreguesGood / entreguesTotal : 0;
 
       const tiles = [
-        { label: "Total de CT-e (filtro atual)", value: fmtN(total), sub: "de " + fmtN(meta.total) + " no relatório", cls: "" },
-        { label: "Pendentes de entrega", value: fmtN(pendentes), sub: total ? fmtPct(pendentes / total) + " do total filtrado" : "—", cls: "warning" },
-        { label: "Pendentes com prazo vencido", value: fmtN(vencidas), sub: pendentes ? fmtPct(vencidas / pendentes) + " das pendentes" : "—", cls: "critical" },
-        { label: "Entregues dentro do prazo", value: entreguesTotal ? fmtPct(pctNoPrazo) : "—", sub: fmtN(entreguesGood) + " de " + fmtN(entreguesTotal) + " entregues", cls: "good" },
-        { label: "Entregues fora do prazo", value: fmtN(entreguesSerious), sub: entreguesTotal ? fmtPct(entreguesSerious / entreguesTotal) + " das entregas" : "—", cls: "serious" }
+        { k: "total", label: "Total de CT-e (filtro atual)", value: fmtN(total), sub: "de " + fmtN(meta.total) + " no relatório", cls: "" },
+        { k: "pendentes", label: "Pendentes de entrega", value: fmtN(pendentes), sub: total ? fmtPct(pendentes / total) + " do total filtrado" : "—", cls: "warning" },
+        { k: "vencidas", label: "Pendentes com prazo vencido", value: fmtN(vencidas), sub: pendentes ? fmtPct(vencidas / pendentes) + " das pendentes" : "—", cls: "critical" },
+        { k: "no_prazo", label: "Entregues dentro do prazo", value: entreguesTotal ? fmtPct(pctNoPrazo) : "—", sub: fmtN(entreguesGood) + " de " + fmtN(entreguesTotal) + " entregues", cls: "good" },
+        { k: "fora_prazo", label: "Entregues fora do prazo", value: fmtN(entreguesSerious), sub: entreguesTotal ? fmtPct(entreguesSerious / entreguesTotal) + " das entregas" : "—", cls: "serious" }
       ];
-      document.getElementById("kpis").innerHTML = tiles.map(t =>
-        '<div class="stat-tile ' + t.cls + '"><div class="label">' + esc(t.label) + '</div><div class="value">' + t.value + '</div><div class="sub">' + esc(t.sub) + '</div></div>'
+      // Clicar num card abre a tela com os CT-e dele (como na tela de Comprovantes).
+      const el = document.getElementById("kpis");
+      el.innerHTML = tiles.map(t =>
+        '<button type="button" class="stat-tile ' + t.cls + '" data-grupo="' + t.k + '" title="Ver os CT-e">' +
+        '<div class="label">' + esc(t.label) + '</div><div class="value">' + t.value + '</div><div class="sub">' + esc(t.sub) + '</div></button>'
       ).join("");
+      el.querySelectorAll(".stat-tile").forEach(b => b.addEventListener("click", () => {
+        location.hash = "lista/" + b.dataset.grupo;
+      }));
     }
+
+    // ---- tela "#lista/<grupo>": CT-e do card clicado, agrupados por
+    // remetente (clientes recolhidos, CT-e e NF ao expandir). Respeita os
+    // filtros do topo; o botão Voltar (ou o voltar do navegador) retorna ao
+    // painel. Mesmo formato da tela de lista de Comprovantes.
+    const GRUPOS = {
+      total: { rotulo: "Total de CT-e", cor: "var(--text-muted)", filtro: () => true, desc: "todos os CT-e do filtro atual" },
+      pendentes: { rotulo: "Pendentes de entrega", cor: "var(--status-warning)", filtro: r => r.status === "PE", desc: "carga ainda não entregue" },
+      vencidas: { rotulo: "Pendentes com prazo vencido", cor: "var(--status-critical)", filtro: r => r.estado === "critical", desc: "não entregues e com o prazo vencido" },
+      no_prazo: { rotulo: "Entregues dentro do prazo", cor: "var(--status-good)", filtro: r => r.status === "DP", desc: "entregues dentro do prazo" },
+      fora_prazo: { rotulo: "Entregues fora do prazo", cor: "var(--status-serious)", filtro: r => r.status === "FPE", desc: "entregues depois do prazo" }
+    };
+    let vlBusca = "";
+    let vlLinhas = [];
+    const vlAbertos = new Set();  // remetentes abertos na tela de lista
+    let vlAnterior = null;
+
+    function vistaAberta() {
+      const m = /^#lista\/(\w+)$/.exec(location.hash);
+      if (!m || !GRUPOS[m[1]]) return null;
+      return Object.assign({ chave: m[1] }, GRUPOS[m[1]]);
+    }
+
+    function rotear() {
+      const v = vistaAberta();
+      document.getElementById("vista-geral").hidden = !!v;
+      document.getElementById("vista-lista").hidden = !v;
+      hideTooltip();
+      if (v) renderVista();
+      window.scrollTo(0, 0);
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      return new Date(iso + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+    }
+
+    function resumoGrupo(rows) {
+      const venc = rows.filter(r => r.estado === "critical").length;
+      const pend = rows.filter(r => r.status === "PE").length;
+      const fora = rows.filter(r => r.status === "FPE").length;
+      const partes = [];
+      if (venc) partes.push(fmtN(venc) + (venc === 1 ? " vencido" : " vencidos"));
+      if (pend - venc > 0) partes.push(fmtN(pend - venc) + (pend - venc === 1 ? " pendente" : " pendentes"));
+      if (fora) partes.push(fmtN(fora) + " fora do prazo");
+      const atraso = rows.reduce((m, r) => Math.max(m, r.dias_atraso || 0), 0);
+      if (atraso > 0) partes.push("maior atraso: " + fmtN(atraso) + (atraso === 1 ? " dia" : " dias"));
+      if (!partes.length) partes.push("emissão mais antiga: " + fmtDate(rows.reduce((m, r) => (!m || (r.emissao && r.emissao < m) ? r.emissao : m), "")));
+      return partes.join(" · ");
+    }
+
+    function renderVista() {
+      const v = vistaAberta();
+      if (!v) return;
+      const recorte = getFiltered();
+
+      document.getElementById("vl-titulo").innerHTML =
+        '<span class="comp-vp-dot" style="background:' + v.cor + '"></span>' + esc(v.rotulo);
+      document.getElementById("vl-abas").innerHTML = Object.keys(GRUPOS).map(k =>
+        '<a href="#lista/' + k + '" class="comp-vp-aba' + (k === v.chave ? " ativa" : "") + '" style="--cor:' + GRUPOS[k].cor + '">' +
+        '<span class="d"></span>' + esc(GRUPOS[k].rotulo) + ' <strong>' + fmtN(recorte.filter(GRUPOS[k].filtro).length) + '</strong></a>'
+      ).join("");
+
+      const q = vlBusca.trim().toLowerCase();
+      const linhas = recorte.filter(r => v.filtro(r) && (!q ||
+        (r.remetente || "").toLowerCase().includes(q) ||
+        (r.destinatario || "").toLowerCase().includes(q) ||
+        String(r.cte || "").toLowerCase().includes(q) ||
+        String(r.notas_fiscais || "").toLowerCase().includes(q)))
+        // Mais atrasados primeiro; depois os mais antigos.
+        .sort((a, b) => (b.dias_atraso || 0) - (a.dias_atraso || 0) || String(a.emissao || "").localeCompare(String(b.emissao || "")));
+      vlLinhas = linhas;
+      const grupos = new Map();
+      linhas.forEach(r => {
+        const nome = r.remetente || "(sem remetente)";
+        if (!grupos.has(nome)) grupos.set(nome, []);
+        grupos.get(nome).push(r);
+      });
+      const ordem = Array.from(grupos.entries()).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], "pt-BR"));
+
+      document.getElementById("vl-sub").textContent =
+        fmtN(linhas.length) + " CT-e de " + fmtN(ordem.length) + (ordem.length === 1 ? " cliente" : " clientes") + " · " + v.desc;
+
+      const lista = document.getElementById("vl-lista");
+      if (!linhas.length) {
+        lista.innerHTML = '<div class="empty-state">Nenhum CT-e para os filtros atuais.</div>';
+        return;
+      }
+      // Clientes vêm recolhidos -- a tabela de cada um só é montada quando
+      // ele é aberto (pode haver milhares de CT-e). Com busca digitada, os
+      // clientes encontrados já abrem.
+      if (vlAnterior !== v.chave) { vlAbertos.clear(); vlAnterior = v.chave; }
+      const comBusca = !!q;
+      lista.innerHTML =
+        '<div class="comp-vp-acoes"><span class="reset-link" data-acao="abrir">Expandir todos</span>' +
+        '<span class="reset-link" data-acao="fechar">Recolher todos</span></div>' +
+        ordem.map(([nome, rows], i) =>
+          '<details class="comp-pend comp-vp-grupo" data-i="' + i + '" style="border-left-color:' + v.cor + '"' +
+          (comBusca || vlAbertos.has(nome) ? " open" : "") + '>' +
+          '<summary class="comp-pend-head"><span class="comp-vp-seta">▸</span><strong>' + esc(nome) + '</strong>' +
+          '<span class="comp-vp-qtd" style="--cor:' + v.cor + '">' + fmtN(rows.length) + ' CT-e</span>' +
+          '<span class="comp-de">' + esc(resumoGrupo(rows)) + '</span></summary>' +
+          '<div class="comp-vp-corpo"></div></details>'
+        ).join("");
+
+      function preencher(det) {
+        const corpo = det.querySelector(".comp-vp-corpo");
+        if (corpo.dataset.ok) return;
+        const rows = ordem[parseInt(det.dataset.i, 10)][1];
+        corpo.innerHTML =
+          '<div class="comp-pend-scroll comp-vp-scroll"><table class="detail comp-pend-table"><thead><tr>' +
+          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Status</th><th>Dias</th><th>Última ocorrência</th><th>Manif.</th><th>Roman.</th>' +
+          '</tr></thead><tbody>' + rows.map(r => {
+            const diasStr = r.dias_atraso == null ? "—" : (r.dias_atraso > 0 ? "+" + r.dias_atraso : r.dias_atraso);
+            return '<tr>' +
+              '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
+              '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—") + '</td>' +
+              '<td>' + fmtDate(r.emissao) + '</td>' +
+              '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario || "", 30)) + '</td>' +
+              '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
+              '<td>' + fmtDate(r.data_baixa) + '</td>' +
+              '<td><span class="status-pill" style="background:color-mix(in srgb, ' + STATUS_COLOR[r.estado] + ' 16%, transparent); color:' + STATUS_COLOR[r.estado] + ';"><span class="d" style="background:' + STATUS_COLOR[r.estado] + '"></span>' + esc(STATUS_SHORT[r.estado]) + '</span></td>' +
+              '<td class="num">' + diasStr + '</td>' +
+              '<td title="' + esc(r.ocorrencia || "") + '">' + esc(truncate(r.ocorrencia || "—", 30)) + '</td>' +
+              '<td class="' + (r.manifesto ? "flag-yes" : "flag-no") + '">' + (r.manifesto ? "Sim" : "Não") + '</td>' +
+              '<td class="' + (r.romaneio ? "flag-yes" : "flag-no") + '">' + (r.romaneio ? "Sim" : "Não") + '</td>' +
+              '</tr>';
+          }).join("") + '</tbody></table></div>';
+        corpo.dataset.ok = "1";
+      }
+
+      lista.querySelectorAll("details.comp-vp-grupo").forEach(det => {
+        if (det.open) preencher(det);
+        det.addEventListener("toggle", () => {
+          if (det.open) preencher(det);
+          if (comBusca) return;  // aberto pela busca -- não fica aberto depois de limpar
+          const nome = ordem[parseInt(det.dataset.i, 10)][0];
+          if (det.open) vlAbertos.add(nome); else vlAbertos.delete(nome);
+        });
+      });
+      lista.querySelectorAll(".comp-vp-acoes [data-acao]").forEach(b => b.addEventListener("click", () => {
+        const abrir = b.dataset.acao === "abrir";
+        lista.querySelectorAll("details.comp-vp-grupo").forEach(det => { det.open = abrir; });
+      }));
+    }
+
+    document.getElementById("vl-voltar").addEventListener("click", e => {
+      e.preventDefault();
+      history.pushState("", document.title, location.pathname + location.search);
+      rotear();
+    });
+    document.getElementById("vl-search").addEventListener("input", function () {
+      vlBusca = this.value; renderVista();
+    });
+    document.getElementById("vl-export").addEventListener("click", () => {
+      const v = vistaAberta();
+      if (!v) return;
+      const lines = [["Remetente", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio"].join(";")];
+      vlLinhas.forEach(r => {
+        lines.push([
+          csvSafe(r.remetente || ""), r.cte, r.serie || "", csvSafe(r.notas_fiscais || ""), r.emissao || "", csvSafe(r.destinatario || ""),
+          csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "", STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso,
+          r.previsao || "", csvSafe(r.ocorrencia || ""), r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao"
+        ].join(";"));
+      });
+      const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "painel_" + v.chave + ".csv";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+    window.addEventListener("hashchange", rotear);
 
     function renderBarChart(containerId, items, opts) {
       opts = opts || {};
@@ -481,9 +660,11 @@
       renderDoc(rows);
       state.page = 1;
       renderTable(rows);
+      if (vistaAberta()) renderVista();
     }
 
     render();
+    rotear();
   }
 
   loadData().then(data => { if (data) boot(data); });
