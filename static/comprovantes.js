@@ -241,16 +241,6 @@
     const dateToEl = document.getElementById("f-date-to");
     const dateSepEl = document.getElementById("f-date-sep");
     const REF_DATE = new Date(meta.referencia + "T00:00:00");
-    // Sempre desconsidera a última semana de emissão: os CT-e dos últimos 7
-    // dias ainda podem estar em rota, então distorcem os números. O corte vale
-    // pra todos os períodos (inclusive "Todo o período" e "Personalizado"),
-    // e os "Últimos N dias" contam pra trás a partir dele.
-    const DIAS_EM_ROTA = 7;
-    const DATA_CORTE = new Date(REF_DATE); DATA_CORTE.setDate(DATA_CORTE.getDate() - DIAS_EM_ROTA);
-    const CORTE_ISO = DATA_CORTE.getFullYear() + "-" + String(DATA_CORTE.getMonth() + 1).padStart(2, "0") + "-" + String(DATA_CORTE.getDate()).padStart(2, "0");
-    dateFromEl.max = CORTE_ISO; dateToEl.max = CORTE_ISO;
-    const corteEl = document.getElementById("f-date-corte");
-    if (corteEl) corteEl.textContent = "até " + DATA_CORTE.toLocaleDateString("pt-BR") + " (últimos " + DIAS_EM_ROTA + " dias não entram: podem estar em rota)";
 
     datePresetEl.addEventListener("change", function () {
       state.datePreset = this.value;
@@ -288,18 +278,17 @@
     });
 
     function inDateRange(iso) {
-      if (!iso) return state.datePreset === "all";
-      const d = new Date(iso + "T00:00:00");
-      if (d > DATA_CORTE) return false;  // última semana: ainda pode estar em rota
       if (state.datePreset === "all") return true;
+      if (!iso) return false;
+      const d = new Date(iso + "T00:00:00");
       if (state.datePreset === "custom") {
         if (dateFromEl.value && d < new Date(dateFromEl.value + "T00:00:00")) return false;
         if (dateToEl.value && d > new Date(dateToEl.value + "T00:00:00")) return false;
         return true;
       }
       const days = parseInt(state.datePreset, 10);
-      const inicio = new Date(DATA_CORTE); inicio.setDate(inicio.getDate() - days);
-      return d >= inicio;
+      const cutoff = new Date(REF_DATE); cutoff.setDate(cutoff.getDate() - days);
+      return d >= cutoff && d <= REF_DATE;
     }
 
     // Filtros de "recorte" (período, tomador, filial, busca) valem pra tudo;
