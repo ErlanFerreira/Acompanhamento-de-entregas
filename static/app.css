@@ -325,7 +325,8 @@ tr.bip-row-warn td { background: color-mix(in srgb, var(--status-warning) 8%, tr
 .comp-pend-scroll { max-height: 320px; overflow: auto; border: 1px solid var(--gridline); border-radius: 8px; background: var(--surface-1); }
 table.comp-pend-table th { cursor: default; }
 table.comp-pend-table td { padding: 6px 8px; }
-.comp-pend-nf { font-variant-numeric: tabular-nums; white-space: normal; max-width: 220px; }
+/* várias NF por CT-e: quebra depois de cada vírgula (e em qualquer ponto se não couber) */
+.comp-pend-nf { font-variant-numeric: tabular-nums; white-space: normal; min-width: 150px; max-width: 260px; overflow-wrap: anywhere; }
 .chip[data-state="entregue"].active { background: var(--series-1); }
 .chip[data-state="pendente"].active { background: var(--series-2); }
 

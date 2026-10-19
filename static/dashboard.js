@@ -325,7 +325,7 @@
             const diasStr = r.dias_atraso == null ? "—" : (r.dias_atraso > 0 ? "+" + r.dias_atraso : r.dias_atraso);
             return '<tr>' +
               '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
-              '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—") + '</td>' +
+              '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—").replace(/,\s*/g, ", ") + '</td>' +
               '<td>' + fmtDate(r.emissao) + '</td>' +
               '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario || "", 30)) + '</td>' +
               '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +

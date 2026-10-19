@@ -621,7 +621,7 @@
         'CT-e ' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") +
         ' <span class="comp-de">· ' + esc(r.consignatario || r.cliente || "—") + '</span>';
       const info = [
-        ["Nota(s) fiscal(is)", esc(r.notas_fiscais || "—")],
+        ["Nota(s) fiscal(is)", esc(r.notas_fiscais || "—").replace(/,\s*/g, ", ")],
         ["Destino", r.cidade_dest ? esc(r.cidade_dest + "/" + r.uf_dest) : "—"],
         ["Entrega", fmtDate(r.data_baixa)],
         ["Comprovante", r.data_comprovante ? "Recebido em " + fmtDate(r.data_comprovante) : (r.foraDaJanela ? "—" : "Falta")],
@@ -734,7 +734,7 @@
         '</tr></thead><tbody>' + mostrar.map((r, idx) =>
           '<tr>' +
           '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
-          '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—") + '</td>' +
+          '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—").replace(/,\s*/g, ", ") + '</td>' +
           '<td title="' + esc(r.consignatario) + '">' + esc(truncate(r.consignatario, 28)) + '</td>' +
           '<td>' + (r.foraDaJanela ? '<span class="bip-muted">fora da janela sincronizada</span>' : esc(r.cidade_dest) + '/' + esc(r.uf_dest)) + '</td>' +
           '<td>' + fmtDate(r.data_baixa) + '</td>' +
@@ -915,7 +915,7 @@
           '</tr></thead><tbody>' + rows.map((r, idx) =>
             '<tr>' +
             '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
-            '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—") + '</td>' +
+            '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—").replace(/,\s*/g, ", ") + '</td>' +
             '<td>' + fmtDate(r.emissao) + '</td>' +
             '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 30)) + '</td>' +
             '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
