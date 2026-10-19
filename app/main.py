@@ -538,12 +538,12 @@ def bipagem_page(request: Request):
 
 
 def _resultado_bipagem(db: Session, leitura: str, empresas: set[str] | None = None) -> dict:
+    # Aceita a chave do nosso CT-e/minuta ou a do DACTE do parceiro
+    # (redespacho) -- nos dois casos `dados` sai com o NOSSO documento.
     try:
-        dados = chave_cte.decodificar(leitura)
+        dados, carga = relatorios_bipagem.resolver_leitura(db, leitura)
     except chave_cte.ChaveInvalida as exc:
         return {"ok": False, "leitura": leitura, "erro": str(exc)}
-
-    carga = relatorios_bipagem.buscar_carga(db, dados)
     if not escopo.carga_visivel(carga, empresas):
         # Analista só bipa CT-e das empresas dele -- CT-e ainda fora da base
         # também fica de fora (não dá pra saber de quem é).
@@ -551,6 +551,13 @@ def _resultado_bipagem(db: Session, leitura: str, empresas: set[str] | None = No
                 else "CT-e ainda não está na base sincronizada -- não dá pra confirmar se é de uma das suas empresas.")
         return {"ok": False, "leitura": leitura, "erro": erro}
     resultado = {"ok": True, **dados, "encontrado": carga is not None}
+    if not carga:
+        # Emitente que não é filial nossa = provavelmente o DACTE de um
+        # parceiro cujo número não aparece como redespacho em CT-e nosso.
+        raiz = dados["cnpj_emitente"][:8]
+        resultado["emitente_externo"] = not db.query(
+            db.query(Carga.id).filter(Carga.cnpj_filial.like(f"{raiz}%")).exists()
+        ).scalar()
     if carga:
         resultado.update({
             "cte": carga.cte,
@@ -569,6 +576,21 @@ def _resultado_bipagem(db: Session, leitura: str, empresas: set[str] | None = No
     return resultado
 
 
+def _bip_do_mesmo_documento(db: Session, resultado: dict) -> Bipagem | None:
+    """Bip já feito do mesmo CT-e/minuta nosso por outra chave (ex: bipou o
+    DACTE do parceiro e depois o nosso, do mesmo transporte)."""
+    serie = relatorios_bipagem.serie_normalizada(resultado["serie"])
+    for b in (
+        db.query(Bipagem)
+        .filter(Bipagem.cnpj_filial == resultado["cnpj_emitente"], Bipagem.numero == resultado["numero"])
+        .order_by(Bipagem.bipado_em.asc())
+    ):
+        serie_bip = relatorios_bipagem.serie_normalizada(b.serie)
+        if serie is None or serie_bip is None or serie_bip == serie:
+            return b
+    return None
+
+
 @app.post("/api/bipagem", dependencies=[Depends(require_auth_api)])
 def api_bipagem_registrar(request: Request, payload: dict, db: Session = Depends(get_db)):
     """Registra um bip -- o mesmo bip vale pro controle de comprovantes e
@@ -583,8 +605,12 @@ def api_bipagem_registrar(request: Request, payload: dict, db: Session = Depends
         .filter(Bipagem.chave == resultado["chave"])
         .order_by(Bipagem.bipado_em.asc())
         .first()
-    )
+    ) or _bip_do_mesmo_documento(db, resultado)
     resultado["duplicado"] = bip is not None
+    if bip:
+        # Pode ter sido bipado antes pela outra chave (a nossa ou a do
+        # parceiro) -- a tela identifica o bip pela chave gravada.
+        resultado["chave"] = bip.chave
     if not bip:
         bip = Bipagem(
             chave=resultado["chave"],

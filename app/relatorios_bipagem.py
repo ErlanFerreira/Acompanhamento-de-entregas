@@ -73,6 +73,68 @@ def buscar_carga(db: Session, dados: dict) -> Carga | None:
     return next((c for c in cargas if _serie_confere(c, dados)), None)
 
 
+def serie_normalizada(serie: str | None) -> str | None:
+    """Série comparável entre bip e CT-e: a minuta é "M" no GW e "99" na
+    chave impressa."""
+    s = str(serie or "").strip().upper()
+    if not s:
+        return None
+    return "M" if s in ("M", "99") else s.lstrip("0") or "0"
+
+
+def _buscar_por_redespacho(db: Session, dados: dict) -> Carga | None:
+    """Chave do DACTE do PARCEIRO: o número dela é o "N. CT-e Redespacho" de
+    um CT-e nosso, e o emitente (o parceiro) é o tomador desse CT-e -- a raiz
+    do CNPJ precisa bater, pra não confundir parceiros diferentes que usam o
+    mesmo número."""
+    numero = dados["numero"]
+    candidatos = {str(numero)} | {str(numero).zfill(w) for w in range(6, 10)}
+    raiz_parceiro = dados["cnpj_emitente"][:8]
+    cargas = [
+        c for c in db.query(Carga).filter(Carga.cte_redespacho.in_(candidatos))
+        if (c.cnpj_consignatario or "")[:8] == raiz_parceiro
+    ]
+    # Mais de um (número reaproveitado pelo parceiro em outro período): o
+    # mais recente.
+    cargas.sort(key=lambda c: c.emissao or "", reverse=True)
+    return cargas[0] if cargas else None
+
+
+def resolver_chave(db: Session, dados: dict) -> tuple[dict, Carga | None]:
+    """Acha o NOSSO CT-e/minuta de uma chave bipada -- a nossa chave ou a do
+    DACTE do parceiro (redespacho). Devolve os dados da chave já com a
+    identidade do nosso documento (filial, número, série, tipo) e a carga.
+
+    Bipada pela chave do parceiro, vem também `via_parceiro=True` e
+    `cte_parceiro_bipado` (o número dele); `chave` continua sendo a chave
+    lida, que identifica o bip."""
+    carga = buscar_carga(db, dados)
+    if carga or dados["modelo"] == chave_cte.MODELO_MINUTA:
+        return dados, carga
+    carga = _buscar_por_redespacho(db, dados)
+    if not carga:
+        return dados, None
+    minuta = serie_normalizada(carga.serie) == "M"
+    nossos = {
+        **dados,
+        "cnpj_emitente": carga.cnpj_filial,
+        "cnpj_emitente_fmt": fmt_cnpj(carga.cnpj_filial),
+        "numero": int(carga.cte) if (carga.cte or "").isdigit() else dados["numero"],
+        "serie": "M" if minuta else (carga.serie or ""),
+        "modelo": chave_cte.MODELO_MINUTA if minuta else chave_cte.MODELO_CTE,
+        "tipo": chave_cte.TIPOS[chave_cte.MODELO_MINUTA if minuta else chave_cte.MODELO_CTE],
+        "via_parceiro": True,
+        "cte_parceiro_bipado": dados["numero"],
+        "cnpj_parceiro_fmt": dados["cnpj_emitente_fmt"],
+    }
+    return nossos, carga
+
+
+def resolver_leitura(db: Session, leitura: str) -> tuple[dict, Carga | None]:
+    """`resolver_chave` a partir do texto lido (levanta `ChaveInvalida`)."""
+    return resolver_chave(db, chave_cte.decodificar(leitura))
+
+
 def _data(iso: str | None):
     return datetime.date.fromisoformat(iso) if iso else None
 
@@ -144,8 +206,11 @@ def gerar_controle_comprovantes(
         q = q.filter(filtro_cargas(empresas))
     cargas = q.order_by(Carga.emissao.asc(), Carga.cte.asc()).all()
 
-    # Primeiro bip de cada CT-e -- (filial, número) -> bip.
-    bips: dict[tuple[str, int], Bipagem] = {}
+    # Primeiro bip de cada CT-e. CT-e e minuta usam a mesma numeração na
+    # mesma filial, então casa pela série também; CT-e sem série na base
+    # (sincronizado antes dessa coluna) casa só por filial + número.
+    bips_por_serie: dict[tuple[str, int, str | None], Bipagem] = {}
+    bips_qualquer: dict[tuple[str, int], Bipagem] = {}
     filiais = {c.cnpj_filial for c in cargas}
     if filiais:
         for b in (
@@ -153,7 +218,16 @@ def gerar_controle_comprovantes(
             .filter(Bipagem.cnpj_filial.in_(filiais))
             .order_by(Bipagem.bipado_em.asc())
         ):
-            bips.setdefault((b.cnpj_filial, b.numero), b)
+            bips_por_serie.setdefault((b.cnpj_filial, b.numero, serie_normalizada(b.serie)), b)
+            bips_qualquer.setdefault((b.cnpj_filial, b.numero), b)
+
+    def bip_do_cte(carga: Carga, numero: int | None) -> Bipagem | None:
+        serie = serie_normalizada(carga.serie)
+        if serie is None:
+            return bips_qualquer.get((carga.cnpj_filial, numero))
+        return bips_por_serie.get((carga.cnpj_filial, numero, serie)) or bips_por_serie.get(
+            (carga.cnpj_filial, numero, None)
+        )
 
     wb = openpyxl.load_workbook(MODELOS / "controle_comprovantes.xlsx", rich_text=True)
     ws = wb.active
@@ -164,7 +238,7 @@ def gerar_controle_comprovantes(
     for i, carga in enumerate(cargas):
         r = _LINHA_INICIAL + i
         numero = int(carga.cte) if (carga.cte or "").isdigit() else None
-        bip = bips.get((carga.cnpj_filial, numero))
+        bip = bip_do_cte(carga, numero)
         valores = [
             carga.cte,
             carga.serie or (bip.serie if bip else None),
@@ -275,10 +349,9 @@ def _substituir(celula, antigo: str, novo: str):
 
 def _item_protocolo(db: Session, chave: str) -> dict | None:
     try:
-        dados = chave_cte.decodificar(chave)
+        dados, carga = resolver_leitura(db, chave)
     except chave_cte.ChaveInvalida:
         return None
-    carga = buscar_carga(db, dados)
     return {
         "cnpj_filial": dados["cnpj_emitente"],
         # DACTE Nº = conhecimento do parceiro; sem redespacho, o nosso.
@@ -417,10 +490,9 @@ def _pendentes_por_tomador(db: Session, empresas: set[str] | None = None) -> dic
     )
     for bip in bips:
         try:
-            dados = chave_cte.decodificar(bip.chave)
+            _dados, carga = resolver_leitura(db, bip.chave)
         except chave_cte.ChaveInvalida:
             continue
-        carga = buscar_carga(db, dados)
         if not carga_visivel(carga, empresas):
             continue
         tid = id_tomador(carga)

@@ -70,6 +70,7 @@
           '<td class="num">' + n + '</td>' +
           '<td class="num"><strong>' + esc(r.numero) + '</strong>' +
             (r.tipo && r.tipo !== "CT-e" ? ' <span class="bip-tag">' + esc(r.tipo) + '</span>' : "") +
+            (r.via_parceiro ? ' <span class="bip-tag" title="Bipado pelo DACTE do parceiro (CT-e ' + esc(r.cte_parceiro_bipado) + ')">via parceiro</span>' : "") +
             (r.protocolo_id ? ' <span class="bip-tag faturado" title="Já entrou no protocolo de faturas nº ' + esc(r.protocolo_id) + '">Protocolo nº ' + esc(r.protocolo_id) + '</span>' : "") + '</td>' +
           '<td class="num">' + esc(r.serie) + '</td>' +
           '<td class="num">' + vazioSe(r.notas_fiscais) + '</td>' +
@@ -127,13 +128,20 @@
     }
 
     const partes = [esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> (série " + esc(r.serie) + ")"];
+    if (r.via_parceiro) {
+      partes[0] = "CT-e do parceiro <strong>" + esc(r.cte_parceiro_bipado) + "</strong> → nosso " + partes[0];
+    }
     if (r.encontrado) {
       partes.push("NF: <strong>" + (r.notas_fiscais ? esc(r.notas_fiscais) : "—") + "</strong>");
       if (r.cte_redespacho) partes.push("CT-e parceiro: <strong>" + esc(r.cte_redespacho) + "</strong>");
       if (r.consignatario) partes.push("Tomador: " + esc(r.consignatario));
       mostrarFeedback("ok", partes.join(" · "));
     } else {
-      partes.push("não está na base sincronizada (emissão " + esc(r.emissao_aamm) + ", emitente " + esc(r.cnpj_emitente_fmt) + ")");
+      if (r.emitente_externo) {
+        partes.push("emitente " + esc(r.cnpj_emitente_fmt) + " não é filial nossa -- se for o DACTE do parceiro, nenhum CT-e nosso tem esse número como redespacho na base sincronizada");
+      } else {
+        partes.push("não está na base sincronizada (emissão " + esc(r.emissao_aamm) + ", emitente " + esc(r.cnpj_emitente_fmt) + ")");
+      }
       mostrarFeedback("aviso", partes.join(" · "));
     }
   }
