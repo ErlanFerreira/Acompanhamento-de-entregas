@@ -426,21 +426,59 @@
       const el = document.getElementById("chart-status");
       el.innerHTML = "";
       if (!total) { el.innerHTML = '<div class="empty-state">Sem dados para o filtro atual.</div>'; document.getElementById("legend-status").innerHTML = ""; return; }
-      const wrap = document.createElement("div");
-      wrap.style.cssText = "display:flex; height:28px; border-radius:6px; overflow:hidden; background:var(--gridline);";
-      counts.forEach(c => {
-        if (!c.n) return;
-        const seg = document.createElement("div");
-        const pct = (c.n / total) * 100;
-        seg.style.cssText = "width:" + pct + "%; background:" + STATUS_COLOR[c.s] + "; position:relative; border-right:2px solid var(--surface-1);";
-        seg.addEventListener("pointerenter", e => showTooltip(e.clientX, e.clientY,
-          '<div class="t-title">' + esc(STATUS_LABEL[c.s]) + '</div><div class="t-row"><span>CT-e</span><span class="t-val">' + fmtN(c.n) + ' (' + fmtPct(c.n / total) + ')</span></div>'));
-        seg.addEventListener("pointermove", e => showTooltip(e.clientX, e.clientY,
-          '<div class="t-title">' + esc(STATUS_LABEL[c.s]) + '</div><div class="t-row"><span>CT-e</span><span class="t-val">' + fmtN(c.n) + ' (' + fmtPct(c.n / total) + ')</span></div>'));
-        seg.addEventListener("pointerleave", hideTooltip);
-        wrap.appendChild(seg);
+      // Gráfico de rosca: cada status é um arco (círculo com traço tracejado)
+      // e o total de CT-e fica no centro.
+      const svgNS = "http://www.w3.org/2000/svg";
+      const SIZE = 200, R = 74, STROKE = 30, C = 2 * Math.PI * R;
+      const svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("viewBox", "0 0 " + SIZE + " " + SIZE);
+      svg.setAttribute("width", SIZE);
+      svg.setAttribute("height", SIZE);
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", "Composição dos CT-e filtrados por status de entrega");
+      svg.style.cssText = "display:block; margin:0 auto; max-width:100%;";
+
+      const trilho = document.createElementNS(svgNS, "circle");
+      trilho.setAttribute("cx", SIZE / 2); trilho.setAttribute("cy", SIZE / 2); trilho.setAttribute("r", R);
+      trilho.setAttribute("fill", "none"); trilho.setAttribute("stroke-width", STROKE);
+      trilho.style.stroke = "var(--gridline)";
+      svg.appendChild(trilho);
+
+      const visiveis = counts.filter(c => c.n);
+      const folga = visiveis.length > 1 ? 2 : 0;  // separa os arcos
+      let acumulado = 0;
+      visiveis.forEach(c => {
+        const len = (c.n / total) * C;
+        const arco = document.createElementNS(svgNS, "circle");
+        arco.setAttribute("cx", SIZE / 2); arco.setAttribute("cy", SIZE / 2); arco.setAttribute("r", R);
+        arco.setAttribute("fill", "none"); arco.setAttribute("stroke-width", STROKE);
+        arco.setAttribute("stroke-dasharray", Math.max(len - folga, 0.5) + " " + (C - Math.max(len - folga, 0.5)));
+        arco.setAttribute("stroke-dashoffset", -acumulado);
+        arco.setAttribute("transform", "rotate(-90 " + SIZE / 2 + " " + SIZE / 2 + ")");
+        arco.style.stroke = STATUS_COLOR[c.s];
+        arco.style.cursor = "pointer";
+        const tip = e => showTooltip(e.clientX, e.clientY,
+          '<div class="t-title">' + esc(STATUS_LABEL[c.s]) + '</div><div class="t-row"><span>CT-e</span><span class="t-val">' + fmtN(c.n) + ' (' + fmtPct(c.n / total) + ')</span></div>');
+        arco.addEventListener("pointerenter", tip);
+        arco.addEventListener("pointermove", tip);
+        arco.addEventListener("pointerleave", hideTooltip);
+        svg.appendChild(arco);
+        acumulado += len;
       });
-      el.appendChild(wrap);
+
+      const numero = document.createElementNS(svgNS, "text");
+      numero.setAttribute("x", SIZE / 2); numero.setAttribute("y", SIZE / 2 + 4);
+      numero.setAttribute("text-anchor", "middle");
+      numero.style.cssText = "font-size:30px; font-weight:700; fill:var(--text-primary);";
+      numero.textContent = fmtN(total);
+      svg.appendChild(numero);
+      const rotulo = document.createElementNS(svgNS, "text");
+      rotulo.setAttribute("x", SIZE / 2); rotulo.setAttribute("y", SIZE / 2 + 24);
+      rotulo.setAttribute("text-anchor", "middle");
+      rotulo.style.cssText = "font-size:12px; fill:var(--text-muted);";
+      rotulo.textContent = total === 1 ? "CT-e" : "CT-e filtrados";
+      svg.appendChild(rotulo);
+      el.appendChild(svg);
       document.getElementById("legend-status").innerHTML = counts.map(c =>
         '<span class="legend-item"><span class="legend-swatch" style="background:' + STATUS_COLOR[c.s] + '"></span>' + esc(STATUS_LABEL[c.s]) + ' <span class="n">' + fmtN(c.n) + '</span> (' + fmtPct(total ? c.n / total : 0) + ')</span>'
       ).join("");
