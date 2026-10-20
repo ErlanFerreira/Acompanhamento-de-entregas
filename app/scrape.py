@@ -108,6 +108,13 @@ def _login(page: Page) -> None:
     if not config.PORTAL_EMAIL or not config.PORTAL_SENHA:
         raise ScrapeError("PORTAL_EMAIL e PORTAL_SENHA precisam estar configurados.")
 
+    # Espaço ou quebra de linha sobrando no começo/fim (comum ao colar a senha
+    # num Secret do GitHub) faz o portal recusar o login sem nenhum aviso.
+    email = config.PORTAL_EMAIL.strip()
+    senha = config.PORTAL_SENHA.strip()
+    if email != config.PORTAL_EMAIL or senha != config.PORTAL_SENHA:
+        logger.warning("PORTAL_EMAIL/PORTAL_SENHA tinham espaço ou quebra de linha nas pontas -- removidos.")
+
     page.goto(f"{PORTAL_URL}/menu", wait_until="networkidle")
 
     # O login às vezes falha silenciosamente na primeira tentativa (parece
@@ -122,14 +129,14 @@ def _login(page: Page) -> None:
         page.wait_for_timeout(1500)
         base = _linhas_visiveis(page)
         try:
-            page.fill('input[name="login"]', config.PORTAL_EMAIL, timeout=10_000)
+            page.fill('input[name="login"]', email, timeout=10_000)
         except PlaywrightTimeoutError:
             # A SPA às vezes passa pela tela de login e redireciona sozinha
             # pro menu/home enquanto a gente espera o campo -- reavalia a URL
             # em vez de estourar o timeout de 30s.
             page.wait_for_load_state("networkidle")
             continue
-        page.fill('input[name="senha"]', config.PORTAL_SENHA)
+        page.fill('input[name="senha"]', senha)
         page.click("button.button-login")
         page.wait_for_timeout(1000)
         novas = [l for l in _linhas_visiveis(page) if l not in base]
