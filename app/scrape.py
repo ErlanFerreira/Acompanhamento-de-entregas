@@ -120,7 +120,10 @@ def _login(page: Page) -> None:
 
     if "/login" in page.url:
         _salvar_debug(page, "login")
-        raise ScrapeError("Login no portal GW Sistemas falhou -- verifique PORTAL_EMAIL/PORTAL_SENHA.")
+        raise ScrapeError(
+            "Login no portal GW Sistemas falhou -- verifique PORTAL_EMAIL/PORTAL_SENHA (senha "
+            f"alterada/expirada, usuário bloqueado ou outra sessão aberta). {_resumo_pagina(page)}"
+        )
 
     # Após o login, a SPA ainda redireciona/inicializa a sessão por um
     # instante -- navegar cedo demais para outra URL derruba a sessão com
