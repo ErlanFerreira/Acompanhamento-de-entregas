@@ -104,6 +104,19 @@ def _tem_captcha(page: Page) -> bool:
         return False
 
 
+def _estrutura_login(page: Page) -> str:
+    """Campos e botões da tela de login (nomes, não valores) -- pra notar se o
+    portal mudou o formulário (ex: campo novo obrigatório)."""
+    try:
+        campos = page.eval_on_selector_all(
+            "input", "els => els.map(e => (e.name || e.type) + (e.value ? '*' : ''))"
+        )
+        botoes = page.eval_on_selector_all("button", "els => els.map(e => e.innerText.trim()).filter(Boolean)")
+        return f"campos={campos} botões={botoes}"
+    except Exception:
+        return "campos=?"
+
+
 def _login(page: Page) -> None:
     if not config.PORTAL_EMAIL or not config.PORTAL_SENHA:
         raise ScrapeError("PORTAL_EMAIL e PORTAL_SENHA precisam estar configurados.")
@@ -115,6 +128,16 @@ def _login(page: Page) -> None:
     if email != config.PORTAL_EMAIL or senha != config.PORTAL_SENHA:
         logger.warning("PORTAL_EMAIL/PORTAL_SENHA tinham espaço ou quebra de linha nas pontas -- removidos.")
 
+    posts: list[str] = []  # POSTs feitos durante o login (status + caminho, sem corpo)
+
+    def _anotar_post(resp):
+        try:
+            if resp.request.method == "POST":
+                posts.append(f"{resp.status} {resp.url.split('?')[0].replace(PORTAL_URL, '')}")
+        except Exception:
+            pass
+
+    page.on("response", _anotar_post)
     page.goto(f"{PORTAL_URL}/menu", wait_until="networkidle")
 
     # O login às vezes falha silenciosamente na primeira tentativa (parece
@@ -151,7 +174,8 @@ def _login(page: Page) -> None:
             "Login no portal GW Sistemas falhou -- verifique PORTAL_EMAIL/PORTAL_SENHA (senha "
             f"alterada/expirada, usuário bloqueado ou outra sessão aberta). "
             f"[Aviso do portal ao entrar: {avisos[-1] if avisos else 'nenhum'} | "
-            f"captcha: {'sim' if _tem_captcha(page) else 'não'}] {_resumo_pagina(page)}"
+            f"captcha: {'sim' if _tem_captcha(page) else 'não'} | POSTs: {posts[-4:] or 'nenhum'} | "
+            f"{_estrutura_login(page)}] {_resumo_pagina(page)}"
         )
 
     # Após o login, a SPA ainda redireciona/inicializa a sessão por um
