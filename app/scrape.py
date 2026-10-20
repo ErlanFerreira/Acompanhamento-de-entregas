@@ -90,6 +90,20 @@ def _menu_principal_visivel(page: Page) -> bool:
     return "Cadastros" in texto and "Relatórios" in texto
 
 
+def _linhas_visiveis(page: Page) -> list[str]:
+    try:
+        return [l.strip() for l in page.inner_text("body", timeout=3000).splitlines() if l.strip()]
+    except Exception:
+        return []
+
+
+def _tem_captcha(page: Page) -> bool:
+    try:
+        return page.locator("iframe[src*='recaptcha'], .g-recaptcha, [class*='captcha' i]").count() > 0
+    except Exception:
+        return False
+
+
 def _login(page: Page) -> None:
     if not config.PORTAL_EMAIL or not config.PORTAL_SENHA:
         raise ScrapeError("PORTAL_EMAIL e PORTAL_SENHA precisam estar configurados.")
@@ -101,10 +115,12 @@ def _login(page: Page) -> None:
     # algumas vezes antes de desistir. Usa a URL (não o título, que fica
     # "Loading ..." transitoriamente) para decidir se ainda está na tela de
     # login.
+    avisos: list[str] = []  # mensagens que o portal mostra ao tentar entrar (somem em segundos)
     for _tentativa in range(3):
         if "/login" not in page.url:
             break
         page.wait_for_timeout(1500)
+        base = _linhas_visiveis(page)
         try:
             page.fill('input[name="login"]', config.PORTAL_EMAIL, timeout=10_000)
         except PlaywrightTimeoutError:
@@ -115,14 +131,20 @@ def _login(page: Page) -> None:
             continue
         page.fill('input[name="senha"]', config.PORTAL_SENHA)
         page.click("button.button-login")
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(1000)
+        novas = [l for l in _linhas_visiveis(page) if l not in base]
+        if novas:
+            avisos.append(" / ".join(novas)[:200])
+        page.wait_for_timeout(2000)
         page.wait_for_load_state("networkidle")
 
     if "/login" in page.url:
         _salvar_debug(page, "login")
         raise ScrapeError(
             "Login no portal GW Sistemas falhou -- verifique PORTAL_EMAIL/PORTAL_SENHA (senha "
-            f"alterada/expirada, usuário bloqueado ou outra sessão aberta). {_resumo_pagina(page)}"
+            f"alterada/expirada, usuário bloqueado ou outra sessão aberta). "
+            f"[Aviso do portal ao entrar: {avisos[-1] if avisos else 'nenhum'} | "
+            f"captcha: {'sim' if _tem_captcha(page) else 'não'}] {_resumo_pagina(page)}"
         )
 
     # Após o login, a SPA ainda redireciona/inicializa a sessão por um
