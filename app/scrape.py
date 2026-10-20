@@ -53,11 +53,51 @@ def _logout(page: Page) -> None:
             page.click("text=Pular tour", timeout=2000)
         except PlaywrightTimeoutError:
             pass
-        page.click(".logout-item", timeout=5000)
-        page.click('button:has-text("Confirmar")', timeout=5000)
+        # O portal mudou o menu (hoje é uma barra no topo, não mais a lateral
+        # com ".logout-item") -- tenta os jeitos conhecidos de achar o "Sair".
+        clicou = False
+        for achar in _ACHAR_SAIR:
+            try:
+                achar(page).first.click(timeout=3000)
+                clicou = True
+                break
+            except Exception:
+                continue
+        if not clicou:
+            _avisar_candidatos_sair(page)
+            return
+        try:
+            page.click('button:has-text("Confirmar")', timeout=3000)
+        except PlaywrightTimeoutError:
+            pass  # nem toda versão do portal pede confirmação
         page.wait_for_timeout(1500)
     except Exception:
         logger.exception("Falha ao tentar fazer logout explícito (ignorando).")
+
+
+_ACHAR_SAIR = (
+    lambda p: p.locator(".logout-item"),
+    lambda p: p.locator('[class*="logout" i], a[href*="logout" i], [title*="sair" i], [aria-label*="sair" i]'),
+    lambda p: p.get_by_text("Sair", exact=True),
+)
+
+
+def _avisar_candidatos_sair(page: Page) -> None:
+    """Não achou o "Sair": publica (como aviso do GitHub Actions, legível sem
+    abrir o log) o que há no menu parecido com sair/usuário, pra ajustar."""
+    try:
+        achados = page.eval_on_selector_all(
+            "a, button, li, i, svg, img, span, div",
+            """els => els.filter(e => /sair|logout|sign.?out|encerrar|usuario|usuário|perfil|avatar|profile/i
+                  .test((e.innerText || '').slice(0, 40) + ' ' + (e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className) +
+                        ' ' + (e.getAttribute('href') || '') + ' ' + (e.getAttribute('title') || '') + ' ' + (e.getAttribute('aria-label') || '')))
+                .filter(e => e.children.length < 4).slice(0, 12)
+                .map(e => e.tagName + '.' + String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className).slice(0, 50) +
+                     '[' + (e.innerText || '').trim().slice(0, 25) + ']' + (e.getAttribute('href') || ''))""",
+        )
+    except Exception:
+        achados = ["?"]
+    print(f"::warning title=Logout sem botao Sair::candidatos={achados}")
 
 
 def _salvar_debug(page: Page, prefixo: str) -> None:
