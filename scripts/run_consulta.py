@@ -99,6 +99,10 @@ def main(job_id: int):
         db.commit()
         print(f"Job {job_id} concluído.")
     except Exception as exc:
+        # Comando de workflow do GitHub: vira uma "annotation" do run, legível
+        # sem abrir o log (e pela API pública), com o motivo da falha.
+        resumo = " ".join(str(exc).split())[:900]
+        print(f"::error title=Consulta {job_id} falhou::{resumo}")
         db.rollback()
         job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
         if job:
