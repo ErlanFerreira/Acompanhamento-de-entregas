@@ -104,6 +104,13 @@ def _tem_captcha(page: Page) -> bool:
         return False
 
 
+# Seletores da tela de login. O portal já renomeou os campos uma vez (de
+# login/senha para email/password), então aceita os dois jeitos.
+_SEL_EMAIL = 'input[name="email"], input[name="login"], input[type="email"]'
+_SEL_SENHA = 'input[type="password"], input[name="password"], input[name="senha"]'
+_SEL_ENTRAR = "button.button-login"
+
+
 def _estrutura_login(page: Page) -> str:
     """Campos e botões da tela de login (nomes, não valores) -- pra notar se o
     portal mudou o formulário (ex: campo novo obrigatório)."""
@@ -152,15 +159,15 @@ def _login(page: Page) -> None:
         page.wait_for_timeout(1500)
         base = _linhas_visiveis(page)
         try:
-            page.fill('input[name="login"]', email, timeout=10_000)
+            page.locator(_SEL_EMAIL).first.fill(email, timeout=10_000)
         except PlaywrightTimeoutError:
             # A SPA às vezes passa pela tela de login e redireciona sozinha
             # pro menu/home enquanto a gente espera o campo -- reavalia a URL
             # em vez de estourar o timeout de 30s.
             page.wait_for_load_state("networkidle")
             continue
-        page.fill('input[name="senha"]', senha)
-        page.click("button.button-login")
+        page.locator(_SEL_SENHA).first.fill(senha, timeout=10_000)
+        page.locator(_SEL_ENTRAR).first.click(timeout=10_000)
         page.wait_for_timeout(1000)
         novas = [l for l in _linhas_visiveis(page) if l not in base]
         if novas:
