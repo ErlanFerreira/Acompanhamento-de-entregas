@@ -6,15 +6,15 @@
   <header class="app-header">
     <div>
       <h1>Emissão de Protocolo</h1>
-      <p>Bipe o código de barras (ou o QR Code) do DACTE ou da minuta — o nosso ou o do parceiro (redespacho). O número sai da própria chave; a NF, o CT-e do parceiro e o tomador vêm da última sincronização com o GW. O mesmo bip vale para o controle de comprovantes e para o protocolo de faturas.</p>
+      <p>Bipe o código de barras (ou o QR Code) do DACTE ou da minuta — o nosso ou o do parceiro (redespacho) —, ou a DANFE da nota fiscal. Sem o documento em mãos, digite o número da NF e tecle Enter. O número sai da própria chave; a NF, o CT-e do parceiro e o tomador vêm da última sincronização com o GW. O mesmo bip vale para o controle de comprovantes e para o protocolo de faturas.</p>
     </div>
     <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
   </header>
 
   <section class="table-section" style="margin-bottom: 20px;">
-    <label class="bip-label" for="f-leitura">Código de barras do CT-e</label>
+    <label class="bip-label" for="f-leitura">Código de barras do CT-e, da minuta ou da NF</label>
     <input type="text" id="f-leitura" class="bip-input" autocomplete="off" autofocus
-           inputmode="numeric" placeholder="Clique aqui e bipe o DACTE…">
+           inputmode="numeric" placeholder="Clique aqui e bipe o DACTE ou a DANFE (ou digite o nº da NF)…">
     <div class="bip-feedback" id="bip-feedback" role="status" aria-live="polite"></div>
   </section>
 

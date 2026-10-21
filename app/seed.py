@@ -9,6 +9,7 @@ _COLUNAS_ADICIONADAS = {
         "cte_redespacho": "VARCHAR(50)",
         "notas_fiscais": "TEXT",
         "cnpj_consignatario": "VARCHAR(20)",
+        "cnpj_remetente": "VARCHAR(20)",
         "endereco_consignatario": "VARCHAR(255)",
         "serie": "VARCHAR(10)",
         "filial": "VARCHAR(60)",

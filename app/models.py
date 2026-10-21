@@ -42,6 +42,9 @@ class Carga(Base):
     # o filtro do controle mensal de comprovantes (ver relatorios_bipagem.py).
     cnpj_consignatario = Column(String(20), nullable=True, index=True)
     endereco_consignatario = Column(String(255), nullable=True)
+    # Emitente das NF do CT-e -- confere a DANFE bipada na Emissão de
+    # Protocolo (o mesmo número de NF existe em empresas diferentes).
+    cnpj_remetente = Column(String(20), nullable=True)
     # Série/nome da filial -- só se o relatório tiver essas colunas.
     serie = Column(String(10), nullable=True)
     filial = Column(String(60), nullable=True)

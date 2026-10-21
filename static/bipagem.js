@@ -71,6 +71,7 @@
           '<td class="num"><strong>' + esc(r.numero) + '</strong>' +
             (r.tipo && r.tipo !== "CT-e" ? ' <span class="bip-tag">' + esc(r.tipo) + '</span>' : "") +
             (r.via_parceiro ? ' <span class="bip-tag" title="Bipado pelo DACTE do parceiro (CT-e ' + esc(r.cte_parceiro_bipado) + ')">via parceiro</span>' : "") +
+            (r.via_nf ? ' <span class="bip-tag" title="Bipado pela NF ' + esc(r.nf_bipada) + '">via NF</span>' : "") +
             (r.protocolo_id ? ' <span class="bip-tag faturado" title="Já entrou no protocolo de faturas nº ' + esc(r.protocolo_id) + '">Protocolo nº ' + esc(r.protocolo_id) + '</span>' : "") + '</td>' +
           '<td class="num">' + esc(r.serie) + '</td>' +
           '<td class="num">' + vazioSe(r.notas_fiscais) + '</td>' +
@@ -130,6 +131,8 @@
     const partes = [esc(r.tipo || "CT-e") + " <strong>" + esc(r.numero) + "</strong> (série " + esc(r.serie) + ")"];
     if (r.via_parceiro) {
       partes[0] = "CT-e do parceiro <strong>" + esc(r.cte_parceiro_bipado) + "</strong> → nosso " + partes[0];
+    } else if (r.via_nf) {
+      partes[0] = "NF <strong>" + esc(r.nf_bipada) + "</strong> → nosso " + partes[0];
     }
     if (r.encontrado) {
       partes.push("NF: <strong>" + (r.notas_fiscais ? esc(r.notas_fiscais) : "—") + "</strong>");

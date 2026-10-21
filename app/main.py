@@ -538,12 +538,27 @@ def bipagem_page(request: Request):
 
 
 def _resultado_bipagem(db: Session, leitura: str, empresas: set[str] | None = None) -> dict:
-    # Aceita a chave do nosso CT-e/minuta ou a do DACTE do parceiro
-    # (redespacho) -- nos dois casos `dados` sai com o NOSSO documento.
+    # Aceita a chave do nosso CT-e/minuta, a do DACTE do parceiro
+    # (redespacho), a da DANFE ou o número da NF digitado -- em todos os
+    # casos `dados` sai com o NOSSO documento.
     try:
         dados, carga = relatorios_bipagem.resolver_leitura(db, leitura)
     except chave_cte.ChaveInvalida as exc:
         return {"ok": False, "leitura": leitura, "erro": str(exc)}
+    if dados.get("nf_nao_encontrada"):
+        return {"ok": False, "leitura": leitura, "erro": (
+            f"NF {dados['nf_bipada']} não está em nenhum CT-e da base sincronizada"
+            + (" desse emitente." if dados.get("modelo") == chave_cte.MODELO_NFE else ".")
+        )}
+    if dados.get("nf_ambigua"):
+        lista = "; ".join(
+            f"CT-e {c['cte']}{'/' + c['serie'] if c['serie'] else ''} ({(c['remetente'] or '')[:30]})"
+            for c in dados["nf_ambigua"]
+        )
+        return {"ok": False, "leitura": leitura, "erro": (
+            f"NF {dados['nf_bipada']} está em mais de um CT-e: {lista}. "
+            + ("Bipe o DACTE." if dados.get("modelo") == chave_cte.MODELO_NFE else "Bipe a DANFE ou o DACTE.")
+        )}
     if not escopo.carga_visivel(carga, empresas):
         # Analista só bipa CT-e das empresas dele -- CT-e ainda fora da base
         # também fica de fora (não dá pra saber de quem é).
@@ -632,8 +647,11 @@ def api_bipagem_remover(request: Request, chave: str, db: Session = Depends(get_
     o CT-e volta a ficar sem data de envio. Não desfaz bip que já entrou num
     protocolo de faturas (desfaça o protocolo antes)."""
     empresas = escopo_empresas(request)
-    if empresas is not None and not _resultado_bipagem(db, chave, empresas)["ok"]:
-        return JSONResponse({"erro": "CT-e não encontrado."}, status_code=404)
+    if empresas is not None:
+        bip_existente = db.query(Bipagem).filter(Bipagem.chave == chave).first()
+        carga = relatorios_bipagem.carga_do_bip(db, bip_existente) if bip_existente else None
+        if not escopo.carga_visivel(carga, empresas):
+            return JSONResponse({"erro": "CT-e não encontrado."}, status_code=404)
     faturado = (
         db.query(Bipagem.protocolo_id)
         .filter(Bipagem.chave == chave, Bipagem.protocolo_id.isnot(None))

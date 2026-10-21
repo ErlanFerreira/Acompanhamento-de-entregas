@@ -12,6 +12,7 @@ logo, cores, fórmulas e layout de impressão):
 import copy
 import datetime
 import io
+import re
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -100,6 +101,72 @@ def _buscar_por_redespacho(db: Session, dados: dict) -> Carga | None:
     return cargas[0] if cargas else None
 
 
+def _numeros_nf(texto: str | None) -> set[int]:
+    """NFs da coluna "Notas" (ex: "589002,589003")."""
+    return {int(t) for t in re.findall(r"\d+", texto or "")}
+
+
+def buscar_por_nf(db: Session, numero: int, cnpj_emitente: str | None = None) -> list[Carga]:
+    """CT-e/minutas nossos que transportaram a NF.
+
+    Com o CNPJ do emitente da NF (vem na chave da DANFE), só os CT-e em que
+    a raiz dele é a do remetente (ou do tomador) -- o mesmo número de NF
+    existe em empresas diferentes. CT-e sincronizados antes de existir o
+    CNPJ do remetente na base só entram se nenhum CT-e conferir."""
+    cargas = [
+        c for c in db.query(Carga).filter(Carga.notas_fiscais.like(f"%{numero}%"))
+        if numero in _numeros_nf(c.notas_fiscais)
+    ]
+    if cnpj_emitente:
+        raiz = cnpj_emitente[:8]
+        conferem = [
+            c for c in cargas
+            if raiz in ((c.cnpj_remetente or "")[:8], (c.cnpj_consignatario or "")[:8])
+        ]
+        cargas = conferem or [c for c in cargas if not c.cnpj_remetente]
+    cargas.sort(key=lambda c: c.emissao or "", reverse=True)
+    return cargas
+
+
+def _dados_do_nosso_documento(dados: dict, carga: Carga) -> dict:
+    """Dados da leitura trocados pela identidade do NOSSO CT-e/minuta
+    (filial, número, série, tipo) -- quando o que foi bipado é a chave de
+    outro documento (DACTE do parceiro, DANFE) ou o número da NF."""
+    minuta = serie_normalizada(carga.serie) == "M"
+    modelo = chave_cte.MODELO_MINUTA if minuta else chave_cte.MODELO_CTE
+    return {
+        **dados,
+        "cnpj_emitente": carga.cnpj_filial,
+        "cnpj_emitente_fmt": fmt_cnpj(carga.cnpj_filial),
+        "numero": int(carga.cte) if (carga.cte or "").isdigit() else dados.get("numero"),
+        "serie": "M" if minuta else (carga.serie or ""),
+        "modelo": modelo,
+        "tipo": chave_cte.TIPOS[modelo],
+    }
+
+
+def _resolver_nf(db: Session, numero: int, cnpj_emitente: str | None, dados: dict) -> tuple[dict, Carga | None]:
+    cargas = buscar_por_nf(db, numero, cnpj_emitente)
+    base = {**dados, "via_nf": True, "nf_bipada": numero}
+    if not cargas:
+        return {**base, "nf_nao_encontrada": True}, None
+    if len({c.id_cte for c in cargas}) > 1:
+        # NF em mais de um CT-e (ou, sem a DANFE, de empresas diferentes) --
+        # não dá pra escolher sozinho.
+        base["nf_ambigua"] = [
+            {"cte": c.cte, "serie": c.serie, "remetente": c.remetente, "emissao": c.emissao}
+            for c in cargas[:8]
+        ]
+        return base, None
+    carga = cargas[0]
+    nossos = _dados_do_nosso_documento(base, carga)
+    if not nossos.get("chave") or len(nossos["chave"]) != 44:
+        # Número de NF digitado: não há chave -- o bip é identificado pela
+        # NF + o nosso documento.
+        nossos["chave"] = f"NF:{numero}:{carga.cnpj_filial}:{nossos['numero']}:{nossos['serie']}"
+    return nossos, carga
+
+
 def resolver_chave(db: Session, dados: dict) -> tuple[dict, Carga | None]:
     """Acha o NOSSO CT-e/minuta de uma chave bipada -- a nossa chave ou a do
     DACTE do parceiro (redespacho). Devolve os dados da chave já com a
@@ -108,31 +175,51 @@ def resolver_chave(db: Session, dados: dict) -> tuple[dict, Carga | None]:
     Bipada pela chave do parceiro, vem também `via_parceiro=True` e
     `cte_parceiro_bipado` (o número dele); `chave` continua sendo a chave
     lida, que identifica o bip."""
+    if dados["modelo"] == chave_cte.MODELO_NFE:
+        return _resolver_nf(db, dados["numero"], dados["cnpj_emitente"], dados)
     carga = buscar_carga(db, dados)
     if carga or dados["modelo"] == chave_cte.MODELO_MINUTA:
         return dados, carga
     carga = _buscar_por_redespacho(db, dados)
     if not carga:
         return dados, None
-    minuta = serie_normalizada(carga.serie) == "M"
-    nossos = {
-        **dados,
-        "cnpj_emitente": carga.cnpj_filial,
-        "cnpj_emitente_fmt": fmt_cnpj(carga.cnpj_filial),
-        "numero": int(carga.cte) if (carga.cte or "").isdigit() else dados["numero"],
-        "serie": "M" if minuta else (carga.serie or ""),
-        "modelo": chave_cte.MODELO_MINUTA if minuta else chave_cte.MODELO_CTE,
-        "tipo": chave_cte.TIPOS[chave_cte.MODELO_MINUTA if minuta else chave_cte.MODELO_CTE],
+    nossos = _dados_do_nosso_documento(dados, carga)
+    nossos.update({
         "via_parceiro": True,
         "cte_parceiro_bipado": dados["numero"],
         "cnpj_parceiro_fmt": dados["cnpj_emitente_fmt"],
-    }
+    })
     return nossos, carga
 
 
 def resolver_leitura(db: Session, leitura: str) -> tuple[dict, Carga | None]:
-    """`resolver_chave` a partir do texto lido (levanta `ChaveInvalida`)."""
-    return resolver_chave(db, chave_cte.decodificar(leitura))
+    """`resolver_chave` a partir do texto lido: chave de 44 dígitos (ou QR
+    Code), ou só o número de uma NF digitado (até 9 dígitos). Levanta
+    `ChaveInvalida` se não for nenhum dos dois."""
+    texto = (leitura or "").strip()
+    if re.fullmatch(r"\d{1,9}", texto) and int(texto) > 0:
+        return _resolver_nf(db, int(texto), None, {"chave": None, "numero": int(texto)})
+    return resolver_chave(db, chave_cte.decodificar(texto))
+
+
+def carga_do_bip(db: Session, bip: Bipagem) -> Carga | None:
+    """CT-e/minuta de um bip gravado: pela identidade do nosso documento
+    (filial + número + série, gravada em todo bip); se o documento ainda não
+    estava na base quando foi bipado, refaz a busca pela chave lida."""
+    serie = serie_normalizada(bip.serie)
+    minuta = serie == "M"
+    carga = buscar_carga(db, {
+        "cnpj_emitente": bip.cnpj_filial,
+        "numero": bip.numero,
+        "serie": "99" if minuta else (serie or ""),
+        "modelo": chave_cte.MODELO_MINUTA if minuta else chave_cte.MODELO_CTE,
+    })
+    if carga:
+        return carga
+    try:
+        return resolver_leitura(db, bip.chave)[1]
+    except chave_cte.ChaveInvalida:
+        return None
 
 
 def _data(iso: str | None):
@@ -347,15 +434,12 @@ def _substituir(celula, antigo: str, novo: str):
         celula.value = valor.replace(antigo, novo)
 
 
-def _item_protocolo(db: Session, chave: str) -> dict | None:
-    try:
-        dados, carga = resolver_leitura(db, chave)
-    except chave_cte.ChaveInvalida:
-        return None
+def _item_protocolo(db: Session, bip: Bipagem) -> dict:
+    carga = carga_do_bip(db, bip)
     return {
-        "cnpj_filial": dados["cnpj_emitente"],
+        "cnpj_filial": carga.cnpj_filial if carga else bip.cnpj_filial,
         # DACTE Nº = conhecimento do parceiro; sem redespacho, o nosso.
-        "dacte": _int_se_numero(carga.cte_redespacho) if carga and carga.cte_redespacho else dados["numero"],
+        "dacte": _int_se_numero(carga.cte_redespacho) if carga and carga.cte_redespacho else bip.numero,
         "nf": _int_se_numero(carga.notas_fiscais) if carga else None,
         "tomador_cnpj": carga.cnpj_consignatario if carga else None,
         "tomador_nome": (carga.consignatario if carga else None) or "TOMADOR NÃO IDENTIFICADO",
@@ -401,13 +485,13 @@ def _recebedor(itens: list[dict]) -> dict:
     return {**base, "tomador_nome": nome}
 
 
-def gerar_protocolo_faturas(db: Session, chaves: list[str]) -> bytes:
+def gerar_protocolo_faturas(db: Session, bips: list[Bipagem]) -> bytes:
     # Um grupo (aba) por filial emitente + cliente. Cliente com vários CNPJ
     # (filiais dele, mesma raiz -- ex: FL Brasil, Modular, Capivari) sai
     # consolidado numa aba só.
     grupos: dict[tuple, list[dict]] = {}
-    for chave in chaves:
-        item = _item_protocolo(db, chave)
+    for bip in bips:
+        item = _item_protocolo(db, bip)
         if item:
             cliente = item["tomador_cnpj"][:8] if item["tomador_cnpj"] else item["tomador_nome"]
             grupos.setdefault((item["cnpj_filial"], cliente), []).append(item)
@@ -489,10 +573,7 @@ def _pendentes_por_tomador(db: Session, empresas: set[str] | None = None) -> dic
         .all()
     )
     for bip in bips:
-        try:
-            _dados, carga = resolver_leitura(db, bip.chave)
-        except chave_cte.ChaveInvalida:
-            continue
+        carga = carga_do_bip(db, bip)
         if not carga_visivel(carga, empresas):
             continue
         tid = id_tomador(carga)
@@ -536,16 +617,17 @@ def criar_protocolo_faturas(db: Session, tomador: str, empresas: set[str] | None
     db.query(Bipagem).filter(Bipagem.id.in_(ids), Bipagem.protocolo_id.is_(None)).update(
         {Bipagem.protocolo_id: protocolo.id}, synchronize_session=False
     )
-    chaves = [
-        b.chave for b in db.query(Bipagem)
+    bips = (
+        db.query(Bipagem)
         .filter(Bipagem.protocolo_id == protocolo.id)
         .order_by(Bipagem.bipado_em.asc())
-    ]
-    if not chaves:
+        .all()
+    )
+    if not bips:
         db.rollback()
         return None
-    protocolo.quantidade = len(chaves)
-    protocolo.arquivo = gerar_protocolo_faturas(db, chaves)
+    protocolo.quantidade = len(bips)
+    protocolo.arquivo = gerar_protocolo_faturas(db, bips)
     db.commit()
     return protocolo
 
