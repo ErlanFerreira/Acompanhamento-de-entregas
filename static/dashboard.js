@@ -166,7 +166,7 @@
         if (!state.statuses.has(r.estado)) return false;
         if (state.uf !== "all" && r.uf_dest !== state.uf) return false;
         if (!inDateRange(r.emissao)) return false;
-        if (q && !(r.cte.toLowerCase().includes(q) || r.remetente.toLowerCase().includes(q) || r.destinatario.toLowerCase().includes(q))) return false;
+        if (q && !(r.cte.toLowerCase().includes(q) || (r.consignatario || "").toLowerCase().includes(q) || r.destinatario.toLowerCase().includes(q))) return false;
         return true;
       });
     }
@@ -199,7 +199,7 @@
     }
 
     // ---- tela "#lista/<grupo>": CT-e do card clicado, agrupados por
-    // remetente (clientes recolhidos, CT-e e NF ao expandir). Respeita os
+    // tomador/consignatário (clientes recolhidos, CT-e e NF ao expandir). Respeita os
     // filtros do topo; o botão Voltar (ou o voltar do navegador) retorna ao
     // painel. Mesmo formato da tela de lista de Comprovantes.
     const GRUPOS = {
@@ -211,7 +211,7 @@
     };
     let vlBusca = "";
     let vlLinhas = [];
-    const vlAbertos = new Set();  // remetentes abertos na tela de lista
+    const vlAbertos = new Set();  // tomadores abertos na tela de lista
     let vlAnterior = null;
 
     function vistaAberta() {
@@ -262,7 +262,7 @@
 
       const q = vlBusca.trim().toLowerCase();
       const linhas = recorte.filter(r => v.filtro(r) && (!q ||
-        (r.remetente || "").toLowerCase().includes(q) ||
+        (r.consignatario || "").toLowerCase().includes(q) ||
         (r.destinatario || "").toLowerCase().includes(q) ||
         String(r.cte || "").toLowerCase().includes(q) ||
         String(r.notas_fiscais || "").toLowerCase().includes(q)))
@@ -271,7 +271,7 @@
       vlLinhas = linhas;
       const grupos = new Map();
       linhas.forEach(r => {
-        const nome = r.remetente || "(sem remetente)";
+        const nome = r.consignatario || "(sem tomador)";
         if (!grupos.has(nome)) grupos.set(nome, []);
         grupos.get(nome).push(r);
       });
@@ -354,10 +354,10 @@
     document.getElementById("vl-export").addEventListener("click", () => {
       const v = vistaAberta();
       if (!v) return;
-      const lines = [["Remetente", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio"].join(";")];
+      const lines = [["Tomador", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio"].join(";")];
       vlLinhas.forEach(r => {
         lines.push([
-          csvSafe(r.remetente || ""), r.cte, r.serie || "", csvSafe(r.notas_fiscais || ""), r.emissao || "", csvSafe(r.destinatario || ""),
+          csvSafe(r.consignatario || ""), r.cte, r.serie || "", csvSafe(r.notas_fiscais || ""), r.emissao || "", csvSafe(r.destinatario || ""),
           csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "", STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso,
           r.previsao || "", csvSafe(r.ocorrencia || ""), r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao"
         ].join(";"));
@@ -633,7 +633,7 @@
           return '<tr>' +
             '<td>' + esc(r.cte) + '</td>' +
             '<td>' + fmtDateShort(r.emissao) + '</td>' +
-            '<td title="' + esc(r.remetente) + '">' + esc(truncate(r.remetente, 26)) + '</td>' +
+            '<td title="' + esc(r.consignatario) + '">' + esc(truncate(r.consignatario || "", 26)) + '</td>' +
             '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 26)) + '</td>' +
             '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
             '<td><span class="status-pill" style="background:color-mix(in srgb, ' + STATUS_COLOR[r.estado] + ' 16%, transparent); color:' + STATUS_COLOR[r.estado] + ';"><span class="d" style="background:' + STATUS_COLOR[r.estado] + '"></span>' + esc(STATUS_SHORT[r.estado]) + '</span></td>' +
@@ -669,11 +669,11 @@
 
     function exportCsv() {
       const rows = window._currentTableData || [];
-      const headers = ["CT-e", "Emissao", "Remetente", "Destinatario", "Cidade", "UF", "Status", "Dias", "Ocorrencia", "Manifesto", "Romaneio"];
+      const headers = ["CT-e", "Emissao", "Tomador", "Destinatario", "Cidade", "UF", "Status", "Dias", "Ocorrencia", "Manifesto", "Romaneio"];
       const lines = [headers.join(";")];
       rows.forEach(r => {
         lines.push([
-          r.cte, r.emissao, csvSafe(r.remetente), csvSafe(r.destinatario), csvSafe(r.cidade_dest), r.uf_dest,
+          r.cte, r.emissao, csvSafe(r.consignatario || ""), csvSafe(r.destinatario), csvSafe(r.cidade_dest), r.uf_dest,
           STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso, csvSafe(r.ocorrencia || ""),
           r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao"
         ].join(";"));
@@ -692,7 +692,7 @@
       renderKpis(rows);
       renderStatusComposition(rows);
       renderTrend(rows);
-      renderBarChart("chart-remetentes", topN(rows.filter(r => r.status === "PE"), r => r.remetente, 10), { color: "var(--seq-450)" });
+      renderBarChart("chart-remetentes", topN(rows.filter(r => r.status === "PE"), r => r.consignatario || "(sem tomador)", 10), { color: "var(--seq-450)" });
       renderBarChart("chart-cidades", topN(rows.filter(r => r.status === "PE"), r => r.cidade_dest + "/" + r.uf_dest, 10), { color: "var(--seq-450)" });
       renderCausas(rows);
       renderDoc(rows);
