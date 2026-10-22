@@ -214,10 +214,34 @@
     const vlAbertos = new Set();  // tomadores abertos na tela de lista
     let vlAnterior = null;
 
+    // Filtro extra da lista, vindo dos gráficos de tomadores e cidades:
+    // "#lista/pendentes/tomador/<nome>" ou ".../cidade/<cidade/UF>".
+    const FILTROS_LISTA = {
+      tomador: { rotulo: "Tomador", chave: r => r.consignatario || "(sem tomador)" },
+      cidade: { rotulo: "Cidade de destino", chave: r => r.cidade_dest + "/" + r.uf_dest }
+    };
+
     function vistaAberta() {
-      const m = /^#lista\/(\w+)$/.exec(location.hash);
+      const m = /^#lista\/(\w+)(?:\/(tomador|cidade)\/(.+))?$/.exec(location.hash);
       if (!m || !GRUPOS[m[1]]) return null;
-      return Object.assign({ chave: m[1] }, GRUPOS[m[1]]);
+      const v = Object.assign({ chave: m[1] }, GRUPOS[m[1]]);
+      if (m[2]) {
+        let valor = m[3];
+        try { valor = decodeURIComponent(valor); } catch (e) { /* mantém como veio */ }
+        const f = FILTROS_LISTA[m[2]];
+        v.extra = { tipo: m[2], rotulo: f.rotulo, valor: valor, fn: r => f.chave(r) === valor };
+      }
+      return v;
+    }
+
+    // Endereço de uma aba da lista, mantendo o filtro extra (se houver).
+    function hrefLista(k, v) {
+      return "#lista/" + k + (v.extra ? "/" + v.extra.tipo + "/" + encodeURIComponent(v.extra.valor) : "");
+    }
+
+    // Clique numa barra dos gráficos: abre os CT-e pendentes daquele tomador/cidade.
+    function abrirListaFiltrada(tipo, valor) {
+      location.hash = "lista/pendentes/" + tipo + "/" + encodeURIComponent(valor);
     }
 
     function rotear() {
@@ -251,12 +275,15 @@
     function renderVista() {
       const v = vistaAberta();
       if (!v) return;
-      const recorte = getFiltered();
+      // Com filtro extra (tomador/cidade vindo de um gráfico), tudo na tela --
+      // abas, contagens e lista -- considera só os CT-e dele.
+      const recorte = v.extra ? getFiltered().filter(v.extra.fn) : getFiltered();
 
       document.getElementById("vl-titulo").innerHTML =
-        '<span class="comp-vp-dot" style="background:' + v.cor + '"></span>' + esc(v.rotulo);
+        '<span class="comp-vp-dot" style="background:' + v.cor + '"></span>' + esc(v.rotulo) +
+        (v.extra ? ' <span class="comp-de" style="font-weight:500;">· ' + esc(v.extra.rotulo) + ': ' + esc(v.extra.valor) + '</span>' : "");
       document.getElementById("vl-abas").innerHTML = Object.keys(GRUPOS).map(k =>
-        '<a href="#lista/' + k + '" class="comp-vp-aba' + (k === v.chave ? " ativa" : "") + '" style="--cor:' + GRUPOS[k].cor + '">' +
+        '<a href="' + esc(hrefLista(k, v)) + '" class="comp-vp-aba' + (k === v.chave ? " ativa" : "") + '" style="--cor:' + GRUPOS[k].cor + '">' +
         '<span class="d"></span>' + esc(GRUPOS[k].rotulo) + ' <strong>' + fmtN(recorte.filter(GRUPOS[k].filtro).length) + '</strong></a>'
       ).join("");
 
@@ -288,7 +315,8 @@
       // Clientes vêm recolhidos -- a tabela de cada um só é montada quando
       // ele é aberto (pode haver milhares de CT-e). Com busca digitada, os
       // clientes encontrados já abrem.
-      if (vlAnterior !== v.chave) { vlAbertos.clear(); vlAnterior = v.chave; }
+      const idVista = v.chave + (v.extra ? "|" + v.extra.tipo + "|" + v.extra.valor : "");
+      if (vlAnterior !== idVista) { vlAbertos.clear(); vlAnterior = idVista; }
       const comBusca = !!q;
       lista.innerHTML =
         '<div class="comp-vp-acoes"><span class="reset-link" data-acao="abrir">Expandir todos</span>' +
@@ -386,6 +414,15 @@
           '<div class="bar-label" title="' + esc(d.label) + '">' + esc(d.label) + '</div>' +
           '<div class="bar-track"><div class="bar-fill" style="width:' + pct.toFixed(1) + '%; background:' + color + ';"></div></div>' +
           '<div class="bar-value">' + fmtN(d.value) + '</div>';
+        if (opts.onClick) {
+          // Barra clicável: abre a lista de CT-e (teclado: Enter/Espaço).
+          row.style.cursor = "pointer";
+          row.tabIndex = 0;
+          row.setAttribute("role", "button");
+          row.title = "Ver os CT-e";
+          row.addEventListener("click", () => opts.onClick(d.label));
+          row.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); opts.onClick(d.label); } });
+        }
         const fill = row.querySelector(".bar-fill");
         fill.addEventListener("pointerenter", e => showTooltip(e.clientX, e.clientY,
           '<div class="t-title">' + esc(d.label) + '</div><div class="t-row"><span>Pendências</span><span class="t-val">' + fmtN(d.value) + '</span></div>'));
@@ -692,8 +729,10 @@
       renderKpis(rows);
       renderStatusComposition(rows);
       renderTrend(rows);
-      renderBarChart("chart-remetentes", topN(rows.filter(r => r.status === "PE"), r => r.consignatario || "(sem tomador)", 10), { color: "var(--seq-450)" });
-      renderBarChart("chart-cidades", topN(rows.filter(r => r.status === "PE"), r => r.cidade_dest + "/" + r.uf_dest, 10), { color: "var(--seq-450)" });
+      renderBarChart("chart-remetentes", topN(rows.filter(r => r.status === "PE"), r => FILTROS_LISTA.tomador.chave(r), 10),
+        { color: "var(--seq-450)", onClick: nome => abrirListaFiltrada("tomador", nome) });
+      renderBarChart("chart-cidades", topN(rows.filter(r => r.status === "PE"), r => FILTROS_LISTA.cidade.chave(r), 10),
+        { color: "var(--seq-450)", onClick: nome => abrirListaFiltrada("cidade", nome) });
       renderCausas(rows);
       renderDoc(rows);
       state.page = 1;
