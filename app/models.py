@@ -129,6 +129,8 @@ class Usuario(Base):
     # Recebe o resumo diário das pendências das empresas dele (ver
     # app/resumo_diario.py); sem e-mail, não recebe.
     email = Column(String(255), nullable=True)
+    # Vê no menu o atalho do portal do SAC (o supervisor sempre vê).
+    acesso_sac = Column(Boolean, default=False, nullable=False)
     # Senha definida pelo supervisor (cadastro ou redefinição) -- no próximo
     # login o analista tem de trocar antes de usar o sistema.
     trocar_senha = Column(Boolean, default=True, nullable=False)

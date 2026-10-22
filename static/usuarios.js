@@ -47,6 +47,7 @@
         '<td>' + (u.email ? esc(u.email) : '<span class="bip-muted" title="Sem e-mail, não recebe o resumo diário">—</span>') + '</td>' +
         '<td title="' + esc(u.empresas.join("\n")) + '">' + emp + '</td>' +
         '<td>' + (u.ativo ? '<span class="bip-tag faturado">Ativo</span>' : '<span class="bip-tag">Desativado</span>') +
+          (u.acesso_sac ? ' <span class="bip-tag" title="Vê o atalho do Portal SAC no menu">Portal SAC</span>' : "") +
           (u.ativo && u.trocar_senha ? ' <span class="bip-tag" title="Ainda não trocou a senha definida por você">senha provisória</span>' : "") +
           (u.bloqueado_ate ? ' <span class="bip-tag usr-bloqueado" title="Errou a senha várias vezes">bloqueado até ' +
             new Date(u.bloqueado_ate).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + '</span>' : "") + '</td>' +
@@ -84,6 +85,7 @@
     $("usr-nome").value = u ? u.nome : "";
     $("usr-login").value = u ? u.login : "";
     $("usr-email").value = u ? u.email || "" : "";
+    $("usr-sac").checked = !!(u && u.acesso_sac);
     $("usr-senha").value = "";
     $("usr-senha").required = !u;
     $("usr-senha-hint").textContent = u
@@ -139,7 +141,7 @@
   async function salvar(e) {
     e.preventDefault();
     const dados = {
-      nome: $("usr-nome").value, login: $("usr-login").value, email: $("usr-email").value, senha: $("usr-senha").value,
+      nome: $("usr-nome").value, login: $("usr-login").value, email: $("usr-email").value, acesso_sac: $("usr-sac").checked, senha: $("usr-senha").value,
       empresas: Array.from(marcadas)
     };
     if (editando) dados.ativo = $("usr-ativo").checked;

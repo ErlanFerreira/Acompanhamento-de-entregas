@@ -46,6 +46,7 @@ from .security import (
     require_supervisor_api,
     require_supervisor_page,
     tem_acesso_completo,
+    pode_ver_sac,
     usuario_logado,
     verify_share_token,
 )
@@ -72,6 +73,7 @@ templates = Jinja2Templates(directory="templates")
 templates.env.globals["tem_acesso_completo"] = tem_acesso_completo
 templates.env.globals["eh_supervisor"] = eh_supervisor
 templates.env.globals["usuario_logado"] = usuario_logado
+templates.env.globals["pode_ver_sac"] = pode_ver_sac
 
 
 @app.exception_handler(HTTPException)
@@ -404,6 +406,7 @@ def _usuario_to_dict(u: Usuario, bloqueado_ate: datetime.datetime | None = None)
         "login": u.login,
         "ativo": u.ativo,
         "email": u.email or "",
+        "acesso_sac": bool(u.acesso_sac),
         "trocar_senha": bool(u.trocar_senha),
         "empresas": json.loads(u.empresas or "[]"),
         "criado_em": u.criado_em.isoformat() + "Z" if u.criado_em else None,
@@ -462,7 +465,8 @@ def _validar_usuario(db: Session, payload: dict, usuario_id: int | None) -> tupl
     existente = db.query(Usuario).filter(Usuario.login == login).first()
     if existente and existente.id != usuario_id:
         return None, "Já existe um analista com esse login."
-    return {"nome": nome, "login": login, "senha": senha, "empresas": empresas, "email": email or None}, None
+    return {"nome": nome, "login": login, "senha": senha, "empresas": empresas, "email": email or None,
+            "acesso_sac": bool(payload.get("acesso_sac"))}, None
 
 
 @app.post("/api/usuarios", dependencies=[Depends(require_supervisor_api)])
@@ -473,7 +477,7 @@ def api_usuarios_criar(payload: dict, db: Session = Depends(get_db)):
     u = Usuario(
         nome=dados["nome"], login=dados["login"], senha_hash=hash_senha(dados["senha"]),
         empresas=json.dumps(dados["empresas"], ensure_ascii=False), ativo=True, trocar_senha=True,
-        email=dados["email"],
+        email=dados["email"], acesso_sac=dados["acesso_sac"],
     )
     db.add(u)
     db.commit()
@@ -494,6 +498,8 @@ def api_usuarios_editar(usuario_id: int, payload: dict, db: Session = Depends(ge
     u.empresas = json.dumps(dados["empresas"], ensure_ascii=False)
     if "email" in payload:  # quem não manda o campo (ex.: Desativar) não apaga o e-mail
         u.email = dados["email"]
+    if "acesso_sac" in payload:
+        u.acesso_sac = dados["acesso_sac"]
     if dados["senha"]:
         # Senha nova definida pelo supervisor é provisória: o analista troca
         # no próximo acesso.
