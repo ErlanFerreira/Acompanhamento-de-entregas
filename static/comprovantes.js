@@ -229,7 +229,7 @@
 
     const TODAS = ["com", "falta_entregue", "falta_pendente"];
     const state = {
-      datePreset: "7",  // padrão: últimos 7 dias de emissão
+      datePreset: "14",  // padrão: últimos 14 dias de emissão
       tomador: "all",
       filial: "all",
       situacoes: new Set(TODAS),
@@ -267,9 +267,9 @@
       searchDebounce = setTimeout(() => { state.search = v.trim().toLowerCase(); render(); }, 180);
     });
     document.getElementById("f-reset").addEventListener("click", function () {
-      state.datePreset = "7"; state.tomador = "all"; state.filial = "all"; state.search = "";
+      state.datePreset = "14"; state.tomador = "all"; state.filial = "all"; state.search = "";
       state.situacoes = new Set(TODAS);
-      datePresetEl.value = "7";
+      datePresetEl.value = "14";
       [dateFromEl, dateToEl, dateSepEl].forEach(el => { el.style.display = "none"; });
       tomadorEl.value = "all"; filialEl.value = "all";
       document.getElementById("f-search").value = "";
