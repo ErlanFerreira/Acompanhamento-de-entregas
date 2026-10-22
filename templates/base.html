@@ -13,6 +13,7 @@
     <div class="sidebar-brand">Transrota</div>
     <nav>
       <a href="/painel" class="nav-link {{ 'active' if active == 'painel' else '' }}">Painel</a>
+      <a href="/historico" class="nav-link {{ 'active' if active == 'historico' else '' }}">Histórico</a>
       {% if tem_acesso_completo(request) %}
       <a href="/comprovantes" class="nav-link {{ 'active' if active == 'comprovantes' else '' }}">Comprovantes</a>
       {% endif %}

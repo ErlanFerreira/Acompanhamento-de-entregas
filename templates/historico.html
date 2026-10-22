@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Histórico — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+
+  <header class="app-header">
+    <div>
+      <h1>Histórico</h1>
+      <p id="header-sub">Carregando…</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+    </div>
+  </header>
+
+  <section class="filters" id="filters">
+    <div class="filter-group">
+      <span class="filter-label">Período</span>
+      <select id="f-dias">
+        <option value="14">Últimos 14 dias</option>
+        <option value="30" selected>Últimos 30 dias</option>
+        <option value="60">Últimos 60 dias</option>
+        <option value="90">Últimos 90 dias</option>
+        <option value="180">Últimos 180 dias</option>
+        <option value="365">Último ano</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Comparar com</span>
+      <select id="f-comparar">
+        <option value="1">1 dia atrás</option>
+        <option value="7" selected>7 dias atrás</option>
+        <option value="14">14 dias atrás</option>
+        <option value="30">30 dias atrás</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="grid-2">
+    <figure class="chart-card">
+      <div class="chart-title">Pendentes e vencidos por dia</div>
+      <div class="chart-subtitle">CT-e ainda não entregues e, entre eles, os com prazo vencido</div>
+      <div id="chart-pendentes"></div>
+      <div class="legend" id="legend-pendentes"></div>
+    </figure>
+    <figure class="chart-card">
+      <div class="chart-title">Entregas no prazo</div>
+      <div class="chart-subtitle">Percentual dos CT-e entregues que chegaram dentro do prazo</div>
+      <div id="chart-prazo"></div>
+      <div class="legend" id="legend-prazo"></div>
+    </figure>
+  </section>
+
+  <section class="table-section">
+    <div class="table-toolbar">
+      <div>
+        <h2>Tomadores com mais vencidos</h2>
+        <div class="chart-subtitle" id="rank-sub" style="margin:2px 0 0; font-size:12px; color:var(--text-muted);"></div>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table class="detail" id="rank-table">
+        <thead>
+          <tr>
+            <th>Tomador</th>
+            <th class="num">Pendentes</th>
+            <th class="num">Vencidos</th>
+            <th class="num">Variação dos vencidos</th>
+            <th class="num">Variação dos pendentes</th>
+          </tr>
+        </thead>
+        <tbody id="rank-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="app-footer">
+    <strong>Como é gravado</strong> — a cada sincronização com o GW (várias vezes ao dia) o sistema guarda uma foto dos números; a última do dia é a que vale. O histórico começa no dia em que esta tela entrou no ar, então os gráficos vão ficando mais completos com o tempo. Quem entra com login de analista vê só os números dos tomadores atribuídos a ele.
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/historico.js"></script>
+{% endblock %}

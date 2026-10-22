@@ -34,7 +34,7 @@
     $("usuarios-count").textContent = fmtN(usuarios.length) + " cadastrado(s) · " + fmtN(ativos) + " ativo(s)";
     const tbody = $("usuarios-body");
     if (!usuarios.length) {
-      tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state">Nenhum analista cadastrado ainda. Clique em "+ Novo analista".</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">Nenhum analista cadastrado ainda. Clique em "+ Novo analista".</div></td></tr>';
       return;
     }
     tbody.innerHTML = usuarios.map((u, i) => {
@@ -44,6 +44,7 @@
       return '<tr' + (u.ativo ? "" : ' class="usr-inativo"') + '>' +
         '<td><strong>' + esc(u.nome) + '</strong></td>' +
         '<td>' + esc(u.login) + '</td>' +
+        '<td>' + (u.email ? esc(u.email) : '<span class="bip-muted" title="Sem e-mail, não recebe o resumo diário">—</span>') + '</td>' +
         '<td title="' + esc(u.empresas.join("\n")) + '">' + emp + '</td>' +
         '<td>' + (u.ativo ? '<span class="bip-tag faturado">Ativo</span>' : '<span class="bip-tag">Desativado</span>') +
           (u.ativo && u.trocar_senha ? ' <span class="bip-tag" title="Ainda não trocou a senha definida por você">senha provisória</span>' : "") +
@@ -70,7 +71,7 @@
     const acao = u.ativo ? "Desativar" : "Reativar";
     if (!confirm(acao + " o acesso de " + u.nome + "?" + (u.ativo ? " O acesso é cortado na hora." : ""))) return;
     try {
-      await api("/api/usuarios/" + u.id, { method: "PUT", body: JSON.stringify({ nome: u.nome, login: u.login, empresas: u.empresas, ativo: !u.ativo }) });
+      await api("/api/usuarios/" + u.id, { method: "PUT", body: JSON.stringify({ nome: u.nome, login: u.login, email: u.email, empresas: u.empresas, ativo: !u.ativo }) });
       await carregarUsuarios();
     } catch (e) { alert(e.message); }
   }
@@ -82,6 +83,7 @@
     $("usr-titulo").textContent = u ? "Editar analista" : "Novo analista";
     $("usr-nome").value = u ? u.nome : "";
     $("usr-login").value = u ? u.login : "";
+    $("usr-email").value = u ? u.email || "" : "";
     $("usr-senha").value = "";
     $("usr-senha").required = !u;
     $("usr-senha-hint").textContent = u
@@ -137,7 +139,7 @@
   async function salvar(e) {
     e.preventDefault();
     const dados = {
-      nome: $("usr-nome").value, login: $("usr-login").value, senha: $("usr-senha").value,
+      nome: $("usr-nome").value, login: $("usr-login").value, email: $("usr-email").value, senha: $("usr-senha").value,
       empresas: Array.from(marcadas)
     };
     if (editando) dados.ativo = $("usr-ativo").checked;
@@ -166,6 +168,6 @@
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !modal.hidden) fechar(); });
 
   carregarUsuarios().catch(e => {
-    $("usuarios-body").innerHTML = '<tr><td colspan="5"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
+    $("usuarios-body").innerHTML = '<tr><td colspan="6"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
   });
 })();

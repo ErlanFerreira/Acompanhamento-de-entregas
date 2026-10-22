@@ -1,0 +1,39 @@
+name: Resumo diário por e-mail
+
+# Manda a cada analista (com e-mail cadastrado na tela Usuários) o resumo das
+# pendências das empresas dele. 10:30 UTC = 07:30 no horário de Brasília
+# (UTC-3), de segunda a sexta -- depois da sincronização das 06:10.
+
+on:
+  schedule:
+    - cron: "30 10 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      login:
+        description: "Enviar só para este login (vazio = todos)"
+        required: false
+        default: ""
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - run: python scripts/enviar_resumos.py --login "${{ inputs.login }}"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USUARIO: ${{ secrets.SMTP_USUARIO }}
+          SMTP_SENHA: ${{ secrets.SMTP_SENHA }}
+          # alternativa: a mesma caixa do bot de e-mail
+          IMAP_EMAIL: ${{ secrets.IMAP_EMAIL }}
+          IMAP_SENHA: ${{ secrets.IMAP_SENHA }}
+          APP_URL: ${{ vars.APP_URL }}

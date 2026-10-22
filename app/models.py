@@ -126,11 +126,47 @@ class Usuario(Base):
     # GW (Carga.consignatario / Carga.remetente) -- ver /api/empresas.
     empresas = Column(Text, nullable=False, default="[]")
     ativo = Column(Boolean, default=True, nullable=False)
+    # Recebe o resumo diário das pendências das empresas dele (ver
+    # app/resumo_diario.py); sem e-mail, não recebe.
+    email = Column(String(255), nullable=True)
     # Senha definida pelo supervisor (cadastro ou redefinição) -- no próximo
     # login o analista tem de trocar antes de usar o sistema.
     trocar_senha = Column(Boolean, default=True, nullable=False)
     criado_em = Column(DateTime, default=datetime.datetime.utcnow)
     atualizado_em = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class HistoricoDia(Base):
+    """Foto diária dos números gerais (ver app/historico.py): a última
+    sincronização do dia vale. Dá as tendências do Histórico."""
+
+    __tablename__ = "historico_dia"
+
+    id = Column(Integer, primary_key=True)
+    data = Column(String(10), unique=True, nullable=False, index=True)  # AAAA-MM-DD (Brasília)
+    total = Column(Integer, default=0)
+    pendentes = Column(Integer, default=0)
+    vencidos = Column(Integer, default=0)
+    entregues_no_prazo = Column(Integer, default=0)
+    entregues_fora = Column(Integer, default=0)
+    atualizado_em = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class HistoricoTomador(Base):
+    """A mesma foto diária, por tomador (consignatário) -- ranking e o
+    histórico do analista, que só vê as empresas dele."""
+
+    __tablename__ = "historico_tomador"
+    __table_args__ = (UniqueConstraint("data", "tomador", name="uq_historico_tomador"),)
+
+    id = Column(Integer, primary_key=True)
+    data = Column(String(10), nullable=False, index=True)
+    tomador = Column(String(255), nullable=False, index=True)  # maiúsculo, como em escopo.py
+    total = Column(Integer, default=0)
+    pendentes = Column(Integer, default=0)
+    vencidos = Column(Integer, default=0)
+    entregues_no_prazo = Column(Integer, default=0)
+    entregues_fora = Column(Integer, default=0)
 
 
 class TentativaLogin(Base):

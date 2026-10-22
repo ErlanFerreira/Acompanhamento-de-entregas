@@ -21,7 +21,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem
-from . import bloqueio_login, escopo
+from . import bloqueio_login, escopo, historico
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
 from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura, TratativaComprovante, Usuario
@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(historico.router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 # Usados no menu (base.html): esconder as telas restritas de quem entrou pelo
@@ -211,6 +212,12 @@ def api_link_acesso(request: Request):
 @app.get("/painel", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
 def painel_page(request: Request):
     return templates.TemplateResponse("painel.html", {"request": request, "active": "painel"})
+
+
+@app.get("/historico", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+def historico_page(request: Request):
+    """Tendência dos números dia a dia (foto gravada a cada sincronização)."""
+    return templates.TemplateResponse("historico.html", {"request": request, "active": "historico"})
 
 
 @app.get("/comprovantes", response_class=HTMLResponse, dependencies=[Depends(require_acesso_completo_page)])
@@ -381,6 +388,7 @@ def api_tratativas_remover(request: Request, tratativa_id: int, db: Session = De
 # ------------------------------------------------ usuários (analistas) ----
 
 LOGIN_RE = re.compile(r"^[a-z0-9._-]{3,40}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
 SENHA_MIN = 6
 
 
@@ -395,6 +403,7 @@ def _usuario_to_dict(u: Usuario, bloqueado_ate: datetime.datetime | None = None)
         "nome": u.nome,
         "login": u.login,
         "ativo": u.ativo,
+        "email": u.email or "",
         "trocar_senha": bool(u.trocar_senha),
         "empresas": json.loads(u.empresas or "[]"),
         "criado_em": u.criado_em.isoformat() + "Z" if u.criado_em else None,
@@ -439,6 +448,9 @@ def _validar_usuario(db: Session, payload: dict, usuario_id: int | None) -> tupl
     login = str(payload.get("login") or "").strip().lower()
     senha = str(payload.get("senha") or "")
     empresas = sorted({" ".join(str(e).split()).upper() for e in (payload.get("empresas") or []) if str(e).strip()})
+    email = str(payload.get("email") or "").strip().lower()
+    if email and (len(email) > 255 or not EMAIL_RE.match(email)):
+        return None, "E-mail inválido. Use o formato nome@empresa.com.br (ou deixe em branco)."
     if not nome:
         return None, "Informe o nome do analista."
     if not LOGIN_RE.match(login):
@@ -450,7 +462,7 @@ def _validar_usuario(db: Session, payload: dict, usuario_id: int | None) -> tupl
     existente = db.query(Usuario).filter(Usuario.login == login).first()
     if existente and existente.id != usuario_id:
         return None, "Já existe um analista com esse login."
-    return {"nome": nome, "login": login, "senha": senha, "empresas": empresas}, None
+    return {"nome": nome, "login": login, "senha": senha, "empresas": empresas, "email": email or None}, None
 
 
 @app.post("/api/usuarios", dependencies=[Depends(require_supervisor_api)])
@@ -461,6 +473,7 @@ def api_usuarios_criar(payload: dict, db: Session = Depends(get_db)):
     u = Usuario(
         nome=dados["nome"], login=dados["login"], senha_hash=hash_senha(dados["senha"]),
         empresas=json.dumps(dados["empresas"], ensure_ascii=False), ativo=True, trocar_senha=True,
+        email=dados["email"],
     )
     db.add(u)
     db.commit()
@@ -479,6 +492,8 @@ def api_usuarios_editar(usuario_id: int, payload: dict, db: Session = Depends(ge
         return JSONResponse({"erro": erro}, status_code=400)
     u.nome, u.login = dados["nome"], dados["login"]
     u.empresas = json.dumps(dados["empresas"], ensure_ascii=False)
+    if "email" in payload:  # quem não manda o campo (ex.: Desativar) não apaga o e-mail
+        u.email = dados["email"]
     if dados["senha"]:
         # Senha nova definida pelo supervisor é provisória: o analista troca
         # no próximo acesso.

@@ -14,7 +14,7 @@ from io import BytesIO
 import openpyxl
 from sqlalchemy.orm import Session
 
-from . import config
+from . import config, historico
 from .models import Carga, Meta
 from .scrape import ScrapeError, baixar_relatorio_pendencias
 
@@ -280,6 +280,7 @@ def run_sync(db: Session, window_days: int = None) -> int:
         _set_meta(db, "last_sync_count", str(count))
         _set_meta(db, "last_sync_status", "ok")
         db.commit()
+        historico.registrar_sem_falhar(db)  # foto do dia pro Histórico
         return count
     except Exception as exc:
         db.rollback()

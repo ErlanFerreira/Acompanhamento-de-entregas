@@ -88,6 +88,14 @@
     const dateSepEl = document.getElementById("f-date-sep");
     const REF_DATE = new Date(meta.referencia + "T00:00:00");
 
+    // Link vindo do resumo diário por e-mail ou do Histórico: "?periodo=all"
+    // (ou 3/7/14/30) abre o Painel já nesse período, em vez dos 14 dias padrão.
+    const periodoUrl = new URLSearchParams(location.search).get("periodo");
+    if (periodoUrl && periodoUrl !== "custom" && Array.from(datePresetEl.options).some(o => o.value === periodoUrl)) {
+      state.datePreset = periodoUrl;
+      datePresetEl.value = periodoUrl;
+    }
+
     datePresetEl.addEventListener("change", function () {
       state.datePreset = this.value;
       const custom = this.value === "custom";

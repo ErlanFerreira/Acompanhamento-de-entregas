@@ -19,6 +19,7 @@ _COLUNAS_ADICIONADAS = {
     },
     "usuarios": {
         "trocar_senha": "BOOLEAN DEFAULT TRUE",
+        "email": "VARCHAR(255)",
     },
 }
 
