@@ -14,7 +14,7 @@ import requests
 from fastapi import Depends, FastAPI, Form, Request, UploadFile
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
@@ -282,34 +282,76 @@ def _carga_no_escopo(request: Request, carga: Carga | None) -> bool:
     return carga is not None and escopo.carga_visivel(carga, escopo_empresas(request))
 
 
+# Resposta de /api/cargas já montada, guardada em memória enquanto não entra
+# sincronização nova (os CT-e só mudam nela): quem abre o painel várias vezes
+# não faz o banco reenviar tudo a cada vez. A chave inclui o escopo (empresas
+# do analista), então um analista nunca recebe o que é de outro.
+_CACHE_CARGAS: dict = {}
+_CACHE_CARGAS_MAX = 8
+
+
+def _cargas_cacheadas(chave, validade: str, gerar) -> bytes:
+    dado = _CACHE_CARGAS.get(chave)
+    if dado and dado[0] == validade:
+        return dado[1]
+    corpo = gerar()
+    if len(_CACHE_CARGAS) >= _CACHE_CARGAS_MAX:
+        _CACHE_CARGAS.pop(next(iter(_CACHE_CARGAS)))
+    _CACHE_CARGAS[chave] = (validade, corpo)
+    return corpo
+
+
 @app.get("/api/cargas", dependencies=[Depends(require_auth_api)])
 def api_cargas(
     request: Request,
     data_inicial: str | None = None,
     data_final: str | None = None,
+    busca: str | None = None,
     db: Session = Depends(get_db),
 ):
-    q = db.query(Carga)
+    """CT-e do escopo de quem pediu. As telas pedem só o período que estão
+    mostrando (`data_inicial`): carregar os ~40 mil CT-e a cada abertura gastou
+    a transferência de rede mensal do plano gratuito do banco. `busca` procura
+    em todas as datas (CT-e, NF, tomador, destinatário), no máximo 300."""
     empresas = escopo_empresas(request)
-    if empresas is not None:
-        q = q.filter(_filtro_empresas(empresas))
-    if data_inicial:
-        q = q.filter(Carga.emissao >= data_inicial)
-    if data_final:
-        q = q.filter(Carga.emissao <= data_final)
-    rows = q.all()
-    records = [_row_to_dict(r) for r in rows]
-
     last_sync_at = db.query(Meta).filter(Meta.chave == "last_sync_at").first()
-    gerado_em = last_sync_at.valor[:10] if last_sync_at and last_sync_at.valor else datetime.date.today().isoformat()
+    validade = last_sync_at.valor if last_sync_at and last_sync_at.valor else ""
+    busca = (busca or "").strip().lower()[:60] or None
+    hoje = datetime.date.today().isoformat()
 
-    meta = {
-        "gerado_em": gerado_em,
-        "referencia": datetime.date.today().isoformat(),
-        "total": len(records),
-        "fonte": "Webtrans (GW Sistemas) - relatório \"Pendências\", atualização automática",
-    }
-    return {"meta": meta, "records": records}
+    def gerar() -> bytes:
+        q = db.query(Carga)
+        total_q = db.query(func.count(Carga.id))
+        if empresas is not None:
+            filtro = _filtro_empresas(empresas)
+            q, total_q = q.filter(filtro), total_q.filter(filtro)
+        if data_inicial:
+            q = q.filter(Carga.emissao >= data_inicial)
+        if data_final:
+            q = q.filter(Carga.emissao <= data_final)
+        if busca:
+            like = f"%{busca}%"
+            q = q.filter(or_(
+                func.lower(Carga.cte).like(like), func.lower(func.coalesce(Carga.notas_fiscais, "")).like(like),
+                func.lower(func.coalesce(Carga.consignatario, "")).like(like),
+                func.lower(func.coalesce(Carga.destinatario, "")).like(like),
+            )).limit(300)
+        records = [_row_to_dict(r) for r in q.all()]
+        meta = {
+            "gerado_em": validade[:10] if validade else hoje,
+            "referencia": hoje,
+            "total": total_q.scalar() or 0,  # todos os CT-e do escopo, não só os carregados
+            "carregados": len(records),
+            "carregado_desde": data_inicial or None,  # None = todas as datas
+            "fonte": "Webtrans (GW Sistemas) - relatório \"Pendências\", atualização automática",
+        }
+        return json.dumps({"meta": meta, "records": records}, ensure_ascii=False).encode("utf-8")
+
+    if busca:
+        corpo = gerar()
+    else:
+        corpo = _cargas_cacheadas((frozenset(empresas) if empresas is not None else None, data_inicial, data_final, hoje), validade, gerar)
+    return Response(content=corpo, media_type="application/json")
 
 
 # ------------------------------------------- tratativas de comprovante ----

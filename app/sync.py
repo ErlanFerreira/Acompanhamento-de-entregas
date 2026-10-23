@@ -243,13 +243,30 @@ def ler_relatorio(conteudo: bytes, referencia: str) -> list[dict]:
     return list(registros.values())
 
 
+def _inserir_ou_atualizar(db: Session, registros: list[dict]) -> bool:
+    """Grava em lotes com INSERT ... ON CONFLICT DO UPDATE, sem ler nada do
+    banco antes. Ler os ~40 mil CT-e a cada sincronização (4x por dia) gastava
+    a maior parte da transferência de rede mensal do plano gratuito da Neon;
+    escrever não conta. Devolve False se o banco não suporta (cai no caminho
+    antigo, por ORM)."""
+    dialeto = db.get_bind().dialect.name
+    if dialeto == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    elif dialeto == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert
+    else:
+        return False
+    agora = datetime.datetime.utcnow()
+    for i in range(0, len(registros), 400):
+        lote = [{**r, "atualizado_em": agora} for r in registros[i:i + 400]]
+        stmt = insert(Carga.__table__).values(lote)
+        atualizar = {c: stmt.excluded[c] for c in lote[0] if c != "id_cte"}
+        db.execute(stmt.on_conflict_do_update(index_elements=["id_cte"], set_=atualizar))
+    return True
+
+
 def gravar_registros(db: Session, registros: list[dict]) -> int:
     ids = [r["id_cte"] for r in registros]
-    existentes: dict[str, Carga] = {}
-    for i in range(0, len(ids), 1000):
-        for c in db.query(Carga).filter(Carga.id_cte.in_(ids[i:i + 1000])):
-            existentes[c.id_cte] = c
-
     # Registros gravados antes da série entrar na chave ("cnpj:numero") --
     # agora que o relatório traz a série, o mesmo documento volta como
     # "cnpj:numero:serie"; apaga o antigo pra não ficar duplicado (e pra não
@@ -258,13 +275,18 @@ def gravar_registros(db: Session, registros: list[dict]) -> int:
     for i in range(0, len(antigos), 1000):
         db.query(Carga).filter(Carga.id_cte.in_(antigos[i:i + 1000])).delete(synchronize_session=False)
 
-    for reg in registros:
-        existente = existentes.get(reg["id_cte"])
-        if existente:
-            for k, valor in reg.items():
-                setattr(existente, k, valor)
-        else:
-            db.add(Carga(**reg))
+    if not _inserir_ou_atualizar(db, registros):
+        existentes: dict[str, Carga] = {}
+        for i in range(0, len(ids), 1000):
+            for c in db.query(Carga).filter(Carga.id_cte.in_(ids[i:i + 1000])):
+                existentes[c.id_cte] = c
+        for reg in registros:
+            existente = existentes.get(reg["id_cte"])
+            if existente:
+                for k, valor in reg.items():
+                    setattr(existente, k, valor)
+            else:
+                db.add(Carga(**reg))
     db.commit()
     return len(registros)
 

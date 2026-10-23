@@ -76,9 +76,32 @@
     return c;
   }
 
+  // Período pedido ao abrir a página: "?periodo=all|7|14|30|60|custom" (e
+  // "&de=AAAA-MM-DD&ate=..." no personalizado). O servidor só manda os CT-e
+  // desse período -- mandar os ~40 mil de uma vez a cada abertura estourou a
+  // transferência de rede mensal do banco. Escolher um período mais antigo
+  // que o carregado recarrega a página já com ele; a busca por CT-e/NF vai
+  // ao servidor e acha em qualquer data.
+  const URL_PARAMS = new URLSearchParams(location.search);
+  const PERIODOS = ["all", "7", "14", "30", "60", "custom"];
+  const PERIODO_INICIAL = PERIODOS.includes(URL_PARAMS.get("periodo")) ? URL_PARAMS.get("periodo") : "14";
+
+  function isoLocal(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  // Primeira data de emissão que o período precisa (null = todas).
+  function desdeDoPeriodo(preset, de) {
+    if (preset === "all") return null;
+    if (preset === "custom") return de || null;
+    const d = new Date();
+    d.setDate(d.getDate() - parseInt(preset, 10) - 2);  // folga de fuso/dia
+    return isoLocal(d);
+  }
+
   async function loadData() {
+    const desde = desdeDoPeriodo(PERIODO_INICIAL, URL_PARAMS.get("de"));
     const [resp, respTrat] = await Promise.all([
-      fetch("/api/cargas", { credentials: "same-origin" }),
+      fetch("/api/cargas" + (desde ? "?data_inicial=" + desde : ""), { credentials: "same-origin" }),
       fetch("/api/tratativas", { credentials: "same-origin" })
     ]);
     if (resp.status === 401) { window.location.href = "/login"; return null; }
@@ -195,7 +218,8 @@
 
   function boot(DATA) {
     const meta = DATA.meta;
-    const records = DATA.records.map(r => {
+    const CARREGADO_DESDE = meta.carregado_desde || null;  // null = o servidor mandou todas as datas
+    const enriquecer = r => {
       const rec = Object.assign({}, r, {
         situacao: situacaoDe(r),
         filial_nome: r.filial || fmtCnpj(r.cnpj_filial) || "—",
@@ -206,7 +230,8 @@
       Object.assign(rec, calcularPrazo(rec, meta.referencia));
       rec.alerta_rank = RANK_ALERTA[rec.alerta] || 0;
       return rec;
-    });
+    };
+    const records = DATA.records.map(enriquecer);
 
     document.getElementById("header-sub").innerHTML =
       fmtN(meta.total) + " CT-e sincronizados" +
@@ -229,7 +254,7 @@
 
     const TODAS = ["com", "falta_entregue", "falta_pendente"];
     const state = {
-      datePreset: "14",  // padrão: últimos 14 dias de emissão
+      datePreset: PERIODO_INICIAL,  // padrão: últimos 14 dias de emissão
       tomador: "all",
       filial: "all",
       situacoes: new Set(TODAS),
@@ -242,14 +267,42 @@
     const dateSepEl = document.getElementById("f-date-sep");
     const REF_DATE = new Date(meta.referencia + "T00:00:00");
 
+    datePresetEl.value = PERIODO_INICIAL;
+    if (PERIODO_INICIAL === "custom") {
+      dateFromEl.value = URL_PARAMS.get("de") || "";
+      dateToEl.value = URL_PARAMS.get("ate") || "";
+      [dateFromEl, dateToEl, dateSepEl].forEach(el => { el.style.display = "inline-block"; });
+    }
+
+    function precisaRecarregar(preset, de) {
+      if (!CARREGADO_DESDE) return false;  // já tem todas as datas
+      const necessario = desdeDoPeriodo(preset, de);
+      return necessario === null || necessario < CARREGADO_DESDE;
+    }
+    function recarregarCom(preset, de, ate) {
+      const u = new URL(location.href);
+      u.searchParams.set("periodo", preset);
+      u.searchParams.delete("de"); u.searchParams.delete("ate");
+      if (preset === "custom") {
+        if (de) u.searchParams.set("de", de);
+        if (ate) u.searchParams.set("ate", ate);
+      }
+      location.href = u.toString();  // o "#situacao/..." ou "#prazo/..." aberto continua
+    }
+
     datePresetEl.addEventListener("change", function () {
       state.datePreset = this.value;
       const custom = this.value === "custom";
       [dateFromEl, dateToEl, dateSepEl].forEach(el => { el.style.display = custom ? "inline-block" : "none"; });
+      if (!custom && precisaRecarregar(this.value)) { recarregarCom(this.value); return; }
       render();
     });
-    dateFromEl.addEventListener("change", render);
-    dateToEl.addEventListener("change", render);
+    function aoMudarDatas() {
+      if (precisaRecarregar("custom", dateFromEl.value)) { recarregarCom("custom", dateFromEl.value, dateToEl.value); return; }
+      render();
+    }
+    dateFromEl.addEventListener("change", aoMudarDatas);
+    dateToEl.addEventListener("change", aoMudarDatas);
     tomadorEl.addEventListener("change", function () { state.tomador = this.value; render(); });
     filialEl.addEventListener("change", function () { state.filial = this.value; render(); });
     document.querySelectorAll("#f-situacao .chip").forEach(chip => {
@@ -264,9 +317,10 @@
     document.getElementById("f-search").addEventListener("input", function () {
       clearTimeout(searchDebounce);
       const v = this.value;
-      searchDebounce = setTimeout(() => { state.search = v.trim().toLowerCase(); render(); }, 180);
+      searchDebounce = setTimeout(() => { state.search = v.trim().toLowerCase(); render(); completarBusca(state.search); }, 180);
     });
     document.getElementById("f-reset").addEventListener("click", function () {
+      if (precisaRecarregar("14")) { recarregarCom("14"); return; }
       state.datePreset = "14"; state.tomador = "all"; state.filial = "all"; state.search = "";
       state.situacoes = new Set(TODAS);
       datePresetEl.value = "14";
@@ -545,6 +599,22 @@
       tratPorCte.get(t.id_cte).push(t);
     });
     const recPorId = new Map(records.map(r => [r.id_cte, r]));
+
+    // A tela só carrega o período escolhido; a busca pede ao servidor os CT-e
+    // que batem em qualquer data e junta aos já carregados (se ainda faltam).
+    const buscasFeitas = new Set();
+    async function completarBusca(q) {
+      if (!CARREGADO_DESDE || q.length < 3 || buscasFeitas.has(q)) return;
+      buscasFeitas.add(q);
+      try {
+        const resp = await fetch("/api/cargas?busca=" + encodeURIComponent(q), { credentials: "same-origin" });
+        if (!resp.ok) return;
+        const novos = (await resp.json()).records.filter(r => !recPorId.has(r.id_cte));
+        if (!novos.length) return;
+        novos.forEach(r => { const rec = enriquecer(r); records.push(rec); recPorId.set(rec.id_cte, rec); });
+        if (state.search === q) render();
+      } catch (e) { /* sem rede: segue com o que já tem */ }
+    }
 
     function ultimaTrat(idCte) {
       const lista = tratPorCte.get(idCte);

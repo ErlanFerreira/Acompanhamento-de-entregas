@@ -46,8 +46,30 @@
   }
   function hideTooltip() { tooltip.style.display = "none"; }
 
+  // Período pedido ao abrir a página: "?periodo=all|3|7|14|30|custom" (e
+  // "&de=AAAA-MM-DD&ate=..." no personalizado). O servidor só manda os CT-e
+  // desse período -- mandar os ~40 mil de uma vez a cada abertura estourou a
+  // transferência de rede mensal do banco. Escolher um período mais antigo
+  // que o carregado recarrega a página já com ele.
+  const URL_PARAMS = new URLSearchParams(location.search);
+  const PERIODOS = ["all", "3", "7", "14", "30", "custom"];
+  const PERIODO_INICIAL = PERIODOS.includes(URL_PARAMS.get("periodo")) ? URL_PARAMS.get("periodo") : "14";
+
+  function isoLocal(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  // Primeira data de emissão que o período precisa (null = todas).
+  function desdeDoPeriodo(preset, de) {
+    if (preset === "all") return null;
+    if (preset === "custom") return de || null;
+    const d = new Date();
+    d.setDate(d.getDate() - parseInt(preset, 10) - 2);  // folga de fuso/dia
+    return isoLocal(d);
+  }
+
   async function loadData() {
-    const resp = await fetch("/api/cargas", { credentials: "same-origin" });
+    const desde = desdeDoPeriodo(PERIODO_INICIAL, URL_PARAMS.get("de"));
+    const resp = await fetch("/api/cargas" + (desde ? "?data_inicial=" + desde : ""), { credentials: "same-origin" });
     if (resp.status === 401) { window.location.href = "/login"; return null; }
     return resp.json();
   }
@@ -72,7 +94,7 @@
     });
 
     const state = {
-      datePreset: "14",
+      datePreset: PERIODO_INICIAL,
       uf: "all",
       statuses: new Set(["good", "warning", "critical", "serious"]),
       search: "",
@@ -88,12 +110,30 @@
     const dateSepEl = document.getElementById("f-date-sep");
     const REF_DATE = new Date(meta.referencia + "T00:00:00");
 
-    // Link vindo do resumo diário por e-mail ou do Histórico: "?periodo=all"
-    // (ou 3/7/14/30) abre o Painel já nesse período, em vez dos 14 dias padrão.
-    const periodoUrl = new URLSearchParams(location.search).get("periodo");
-    if (periodoUrl && periodoUrl !== "custom" && Array.from(datePresetEl.options).some(o => o.value === periodoUrl)) {
-      state.datePreset = periodoUrl;
-      datePresetEl.value = periodoUrl;
+    // Estado inicial do filtro de período, vindo do endereço (links do e-mail,
+    // do Histórico ou da recarga abaixo).
+    const CARREGADO_DESDE = meta.carregado_desde || null;  // null = o servidor mandou todas as datas
+    datePresetEl.value = PERIODO_INICIAL;
+    if (PERIODO_INICIAL === "custom") {
+      dateFromEl.value = URL_PARAMS.get("de") || "";
+      dateToEl.value = URL_PARAMS.get("ate") || "";
+      [dateFromEl, dateToEl, dateSepEl].forEach(el => { el.style.display = "inline-block"; });
+    }
+
+    function precisaRecarregar(preset, de) {
+      if (!CARREGADO_DESDE) return false;  // já tem todas as datas
+      const necessario = desdeDoPeriodo(preset, de);
+      return necessario === null || necessario < CARREGADO_DESDE;
+    }
+    function recarregarCom(preset, de, ate) {
+      const u = new URL(location.href);
+      u.searchParams.set("periodo", preset);
+      u.searchParams.delete("de"); u.searchParams.delete("ate");
+      if (preset === "custom") {
+        if (de) u.searchParams.set("de", de);
+        if (ate) u.searchParams.set("ate", ate);
+      }
+      location.href = u.toString();  // o "#lista/..." aberto continua
     }
 
     datePresetEl.addEventListener("change", function () {
@@ -102,10 +142,15 @@
       dateFromEl.style.display = custom ? "inline-block" : "none";
       dateToEl.style.display = custom ? "inline-block" : "none";
       dateSepEl.style.display = custom ? "inline-block" : "none";
+      if (!custom && precisaRecarregar(this.value)) { recarregarCom(this.value); return; }
       render();
     });
-    dateFromEl.addEventListener("change", render);
-    dateToEl.addEventListener("change", render);
+    function aoMudarDatas() {
+      if (precisaRecarregar("custom", dateFromEl.value)) { recarregarCom("custom", dateFromEl.value, dateToEl.value); return; }
+      render();
+    }
+    dateFromEl.addEventListener("change", aoMudarDatas);
+    dateToEl.addEventListener("change", aoMudarDatas);
     ufSelect.addEventListener("change", function () { state.uf = this.value; render(); });
     document.querySelectorAll("#f-status .chip").forEach(chip => {
       chip.addEventListener("click", function () {
@@ -122,6 +167,7 @@
       searchDebounce = setTimeout(() => { state.search = v.trim().toLowerCase(); render(); }, 180);
     });
     document.getElementById("f-reset").addEventListener("click", function () {
+      if (precisaRecarregar("14")) { recarregarCom("14"); return; }
       state.datePreset = "14"; state.uf = "all"; state.search = ""; state.onlyOpen = true;
       state.statuses = new Set(["good", "warning", "critical", "serious"]);
       datePresetEl.value = "14"; dateFromEl.style.display = "none"; dateToEl.style.display = "none"; dateSepEl.style.display = "none";
