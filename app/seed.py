@@ -10,6 +10,7 @@ _COLUNAS_ADICIONADAS = {
         "notas_fiscais": "TEXT",
         "cnpj_consignatario": "VARCHAR(20)",
         "cnpj_remetente": "VARCHAR(20)",
+        "tipo_conhecimento": "VARCHAR(40)",
         "endereco_consignatario": "VARCHAR(255)",
         "serie": "VARCHAR(10)",
         "filial": "VARCHAR(60)",

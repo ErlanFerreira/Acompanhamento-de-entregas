@@ -257,7 +257,7 @@ def preservar_espacos(xlsx: bytes) -> bytes:
 # ------------------------------------------------ controle de comprovantes ----
 
 _LINHA_INICIAL = 9
-_NUM_COLUNAS = 17  # A..Q
+_NUM_COLUNAS = 18  # A..R
 
 
 def gerar_controle_comprovantes(
@@ -318,8 +318,8 @@ def gerar_controle_comprovantes(
 
     wb = openpyxl.load_workbook(MODELOS / "controle_comprovantes.xlsx", rich_text=True)
     ws = wb.active
-    ws["G4"] = inicio
-    ws["G5"] = responsavel or None
+    ws["H4"] = inicio
+    ws["H5"] = responsavel or None
 
     estilos = [ws.cell(row=_LINHA_INICIAL, column=c) for c in range(1, _NUM_COLUNAS + 1)]
     for i, carga in enumerate(cargas):
@@ -329,6 +329,7 @@ def gerar_controle_comprovantes(
         valores = [
             carga.cte,
             carga.serie or (bip.serie if bip else None),
+            carga.tipo_conhecimento,
             carga.filial or dados_filial(carga.cnpj_filial)["apelido"],
             _data(carga.emissao),
             _data(carga.previsao),
@@ -341,7 +342,7 @@ def gerar_controle_comprovantes(
             carga.notas_fiscais,
             carga.cte_redespacho,
             data_br(bip.bipado_em) if bip else None,
-            f'=IF(ISBLANK($N{r}), "Pendente", "Recebido")',
+            f'=IF(ISBLANK($O{r}), "Pendente", "Recebido")',
             None,
             None,
         ]
@@ -355,7 +356,7 @@ def gerar_controle_comprovantes(
                 celula.number_format = estilo.number_format
 
     ultima = _LINHA_INICIAL + max(len(cargas), 1) - 1
-    ws.auto_filter.ref = f"A8:Q{ultima}"
+    ws.auto_filter.ref = f"A8:R{ultima}"
 
     # A formatação condicional do modelo (verde "Recebido" / vermelho
     # "Pendente") cobre um intervalo fixo -- refaz pro tamanho real.
@@ -363,8 +364,8 @@ def gerar_controle_comprovantes(
     ws.conditional_formatting = ConditionalFormattingList()
     for regra in regras:
         texto = regra.text or ""
-        regra.formula = [f'NOT(ISERROR(SEARCH("{texto}",O{_LINHA_INICIAL})))']
-        ws.conditional_formatting.add(f"O{_LINHA_INICIAL}:O{ultima}", regra)
+        regra.formula = [f'NOT(ISERROR(SEARCH("{texto}",P{_LINHA_INICIAL})))']
+        ws.conditional_formatting.add(f"P{_LINHA_INICIAL}:P{ultima}", regra)
 
     return _salvar(wb)
 

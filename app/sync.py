@@ -63,6 +63,7 @@ COLUNAS = [
     ("data_baixa", lambda n: n.startswith("data efetiva baixa")),
     ("status", lambda n: n.startswith("status entrega")),
     ("previsao", lambda n: n.startswith("previsao entrega")),
+    ("tipo_conhecimento", lambda n: "tipo conhecimento" in n),
 ]
 # Sem essas não dá pra montar o registro -- falha a sincronização em vez de
 # gravar lixo (ou nada) em silêncio.
@@ -171,6 +172,7 @@ def mapear_linha_para_registro(row, referencia: str, colunas: dict[str, int]) ->
         "consignatario": v("consignatario") or "",
         "cnpj_consignatario": _so_digitos(v("cnpj_consignatario")) or None,
         "cnpj_remetente": _so_digitos(v("cnpj_remetente")) or None,
+        "tipo_conhecimento": _texto_ou_none(v("tipo_conhecimento")),
         "endereco_consignatario": _montar_endereco(v),
         "cidade_cons": v("cidade_cons"),
         "destinatario": v("destinatario") or "",
