@@ -13,6 +13,8 @@ _COLUNAS_ADICIONADAS = {
         "endereco_consignatario": "VARCHAR(255)",
         "serie": "VARCHAR(10)",
         "filial": "VARCHAR(60)",
+        "cidade_manifesto": "VARCHAR(120)",
+        "cidade_romaneio": "VARCHAR(120)",
     },
     "historico_dia": {
         "em_deposito": "INTEGER DEFAULT 0",

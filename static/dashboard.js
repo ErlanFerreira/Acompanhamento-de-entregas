@@ -203,8 +203,8 @@
       const deposito = rows.filter(emDeposito).length;
       const rota = rows.filter(emRota).length;
       pintarTiles("kpis-logistica", [
-        { k: "deposito", label: "Em depósito (parados)", value: fmtN(deposito), sub: pendentes ? fmtPct(deposito / pendentes) + " das pendentes · sem manifesto nem romaneio" : "sem manifesto nem romaneio", cls: "deposito" },
-        { k: "em_rota", label: "Em rota de entrega", value: fmtN(rota), sub: pendentes ? fmtPct(rota / pendentes) + " das pendentes · com manifesto ou romaneio, até a baixa" : "com manifesto ou romaneio, até a baixa", cls: "rota" }
+        { k: "deposito", label: "Em depósito (parados)", value: fmtN(deposito), sub: pendentes ? fmtPct(deposito / pendentes) + " das pendentes · sem manifesto/romaneio da matriz" : "sem manifesto/romaneio da matriz", cls: "deposito" },
+        { k: "em_rota", label: "Em rota de entrega", value: fmtN(rota), sub: pendentes ? fmtPct(rota / pendentes) + " das pendentes · manifesto/romaneio da matriz, até a baixa" : "manifesto/romaneio da matriz, até a baixa", cls: "rota" }
       ]);
     }
 
@@ -219,9 +219,11 @@
       }));
     }
 
-    // Pendente com manifesto ou romaneio = em rota; sem os dois = em depósito.
-    function emRota(r) { return r.status === "PE" && !!(r.manifesto || r.romaneio); }
-    function emDeposito(r) { return r.status === "PE" && !(r.manifesto || r.romaneio); }
+    // Pendente com manifesto ou romaneio emitido pela matriz (Carpina) = em
+    // rota; sem eles, ou só com documento de filial = em depósito. A regra
+    // fica no servidor (app/logistica.py) e vem pronta em r.logistica.
+    function emRota(r) { return r.logistica === "rota"; }
+    function emDeposito(r) { return r.logistica === "deposito"; }
 
     // ---- tela "#lista/<grupo>": CT-e do card clicado, agrupados por
     // tomador/consignatário (clientes recolhidos, CT-e e NF ao expandir). Respeita os
@@ -231,8 +233,8 @@
       total: { rotulo: "Total de CT-e", cor: "var(--text-muted)", filtro: () => true, desc: "todos os CT-e do filtro atual" },
       pendentes: { rotulo: "Pendentes de entrega", cor: "var(--status-warning)", filtro: r => r.status === "PE", desc: "carga ainda não entregue" },
       vencidas: { rotulo: "Pendentes com prazo vencido", cor: "var(--status-critical)", filtro: r => r.estado === "critical", desc: "não entregues e com o prazo vencido" },
-      deposito: { rotulo: "Em depósito (parados)", cor: "var(--series-2)", filtro: r => emDeposito(r), desc: "pendentes sem manifesto nem romaneio -- parados no depósito" },
-      em_rota: { rotulo: "Em rota de entrega", cor: "var(--series-1)", filtro: r => emRota(r), desc: "pendentes com manifesto ou romaneio -- em rota até a baixa" },
+      deposito: { rotulo: "Em depósito (parados)", cor: "var(--series-2)", filtro: r => emDeposito(r), desc: "pendentes sem manifesto nem romaneio emitido pela matriz (Carpina) -- parados no depósito" },
+      em_rota: { rotulo: "Em rota de entrega", cor: "var(--series-1)", filtro: r => emRota(r), desc: "pendentes com manifesto ou romaneio emitido pela matriz (Carpina) -- em rota até a baixa" },
       no_prazo: { rotulo: "Entregues dentro do prazo", cor: "var(--status-good)", filtro: r => r.status === "DP", desc: "entregues dentro do prazo" },
       fora_prazo: { rotulo: "Entregues fora do prazo", cor: "var(--status-serious)", filtro: r => r.status === "FPE", desc: "entregues depois do prazo" }
     };
@@ -363,7 +365,7 @@
         const rows = ordem[parseInt(det.dataset.i, 10)][1];
         corpo.innerHTML =
           '<div class="comp-pend-scroll comp-vp-scroll"><table class="detail comp-pend-table"><thead><tr>' +
-          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Status</th><th>Dias</th><th>Última ocorrência</th><th>Manif.</th><th>Roman.</th>' +
+          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Status</th><th>Dias</th><th>Última ocorrência</th><th>Manif.</th><th>Cidade do manifesto</th><th>Roman.</th>' +
           '</tr></thead><tbody>' + rows.map(r => {
             const diasStr = r.dias_atraso == null ? "—" : (r.dias_atraso > 0 ? "+" + r.dias_atraso : r.dias_atraso);
             return '<tr>' +
@@ -377,6 +379,7 @@
               '<td class="num">' + diasStr + '</td>' +
               '<td title="' + esc(r.ocorrencia || "") + '">' + esc(truncate(r.ocorrencia || "—", 30)) + '</td>' +
               '<td class="' + (r.manifesto ? "flag-yes" : "flag-no") + '">' + (r.manifesto ? "Sim" : "Não") + '</td>' +
+              '<td>' + (r.manifesto ? esc(r.cidade_manifesto || "—") : "—") + '</td>' +
               '<td class="' + (r.romaneio ? "flag-yes" : "flag-no") + '">' + (r.romaneio ? "Sim" : "Não") + '</td>' +
               '</tr>';
           }).join("") + '</tbody></table></div>';

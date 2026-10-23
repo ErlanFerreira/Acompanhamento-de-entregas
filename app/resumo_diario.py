@@ -149,8 +149,8 @@ def renderizar(usuario: Usuario, dados: dict, hoje: datetime.date) -> tuple[str,
         f"- Pendentes de entrega: {dados['pendentes']}{_texto_variacao(var, 'pendentes')}",
         f"- Com prazo vencido: {dados['vencidos']}{_texto_variacao(var, 'vencidos')}",
     ]
-    linhas.append(f"  - parados no depósito (sem manifesto nem romaneio): {dados['em_deposito']}")
-    linhas.append(f"  - em rota de entrega (com manifesto ou romaneio): {dados['em_rota']}")
+    linhas.append(f"  - parados no depósito (sem manifesto/romaneio da matriz): {dados['em_deposito']}")
+    linhas.append(f"  - em rota de entrega (manifesto/romaneio da matriz): {dados['em_rota']}")
     if dados["maior_atraso"]:
         linhas.append(f"- Maior atraso: {dados['maior_atraso']} dia(s)")
     if dados["pct_no_prazo"] is not None:
@@ -183,8 +183,8 @@ def renderizar(usuario: Usuario, dados: dict, hoje: datetime.date) -> tuple[str,
         cards.append(card("Entregues no prazo", f"{dados['pct_no_prazo'] * 100:.1f}%".replace(".", ","), f"{dados['entregues_fora']} fora do prazo", "#1a9d3a"))
 
     cards_logistica = [
-        card("Parados no depósito", str(dados["em_deposito"]), "sem manifesto nem romaneio", "#eb6834"),
-        card("Em rota de entrega", str(dados["em_rota"]), "com manifesto ou romaneio, até a baixa", "#2a78d6"),
+        card("Parados no depósito", str(dados["em_deposito"]), "sem manifesto/romaneio da matriz", "#eb6834"),
+        card("Em rota de entrega", str(dados["em_rota"]), "manifesto/romaneio da matriz, até a baixa", "#2a78d6"),
     ]
 
     th = 'style="text-align:left;padding:6px 8px;border-bottom:2px solid #e3e6ea;font-size:12px;color:#5a6472;"'

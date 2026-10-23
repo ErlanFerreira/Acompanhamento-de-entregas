@@ -12,10 +12,11 @@ import datetime
 import logging
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from .db import get_db
+from .logistica import cond_em_deposito, cond_em_rota  # noqa: F401 (resumo_diario usa daqui)
 from .models import Carga, HistoricoDia, HistoricoTomador
 from .security import escopo_empresas, require_auth_api
 
@@ -30,17 +31,6 @@ router = APIRouter()
 
 def hoje_brasilia() -> datetime.date:
     return datetime.datetime.now(BRASILIA).date()
-
-
-def cond_em_rota():
-    """Pendente com manifesto ou romaneio: saiu pra entrega e está em rota até
-    ser baixado."""
-    return and_(Carga.status == "PE", or_(Carga.manifesto.is_(True), Carga.romaneio.is_(True)))
-
-
-def cond_em_deposito():
-    """Pendente sem manifesto nem romaneio: ainda parado no depósito."""
-    return and_(Carga.status == "PE", ~or_(Carga.manifesto.is_(True), Carga.romaneio.is_(True)))
 
 
 def _contagens():

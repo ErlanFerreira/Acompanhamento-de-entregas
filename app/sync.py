@@ -32,6 +32,10 @@ SyncError = ScrapeError  # mantém o nome usado pelo resto do app
 # Consignatario" antes de "Consignatario"), e uma coluna já usada não é
 # reaproveitada por outro campo.
 COLUNAS = [
+    # Cidade onde o manifesto/romaneio foi emitido (Carpina = matriz): vêm antes
+    # de "emissao" porque o cabeçalho pode começar com "Emissão ...".
+    ("cidade_manifesto", lambda n: "manifesto" in n and "cidade" in n),
+    ("cidade_romaneio", lambda n: "romaneio" in n and "cidade" in n),
     ("emissao", lambda n: n.startswith("emissao")),
     ("cte", lambda n: n.startswith("numero ct")),
     ("serie", lambda n: n.startswith("serie")),
@@ -174,6 +178,9 @@ def mapear_linha_para_registro(row, referencia: str, colunas: dict[str, int]) ->
         "uf_dest": v("uf_dest") or "",
         "manifesto": _sim(v("manifesto")),
         "romaneio": _sim(v("romaneio")),
+        # None = o relatório não tem a coluna; "" = tem, mas em branco nesse CT-e
+        "cidade_manifesto": (v("cidade_manifesto") or "") if "cidade_manifesto" in colunas else None,
+        "cidade_romaneio": (v("cidade_romaneio") or "") if "cidade_romaneio" in colunas else None,
         "ocorrencia": v("ocorrencia"),
         "entregue": _sim(v("entregue")),
         "data_comprovante": data_comprovante,
@@ -204,6 +211,12 @@ def ler_relatorio(conteudo: bytes, referencia: str) -> list[dict]:
             f"(faltando: {', '.join(faltando) or 'cabeçalho'}). Confira se o relatório personalizado foi alterado."
         )
     logger.info("Colunas detectadas no relatório: %s", colunas)
+    # Aparece como anotação do run no GitHub: confere se as colunas da cidade
+    # de emissão do manifesto/romaneio entraram no relatório.
+    cabecalho = [str(c) for c in linhas[inicio - 1] if c not in (None, "")]
+    print("::notice title=Colunas do relatório Pendências::" + " | ".join(cabecalho)[:900] +
+          f" || cidade_manifesto={'sim' if 'cidade_manifesto' in colunas else 'NÃO'}"
+          f" cidade_romaneio={'sim' if 'cidade_romaneio' in colunas else 'NÃO'}")
 
     registros: dict[str, dict] = {}
     total_linhas = 0

@@ -24,6 +24,10 @@ class Carga(Base):
     uf_dest = Column(String(2))
     manifesto = Column(Boolean, default=False)
     romaneio = Column(Boolean, default=False)
+    # Cidade onde foram emitidos (Carpina = matriz) -- ver app/logistica.py.
+    # None = o relatório do GW não tem a coluna; "" = em branco nesse CT-e.
+    cidade_manifesto = Column(String(120), nullable=True)
+    cidade_romaneio = Column(String(120), nullable=True)
     ocorrencia = Column(Text)
     entregue = Column(Boolean, default=False)
     data_comprovante = Column(String(10))

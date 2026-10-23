@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem
 from . import bloqueio_login, escopo, historico
+from .logistica import classificar as classificar_logistica
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
 from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura, TratativaComprovante, Usuario
@@ -246,6 +247,9 @@ def _row_to_dict(r: Carga) -> dict:
         "uf_dest": r.uf_dest,
         "manifesto": r.manifesto,
         "romaneio": r.romaneio,
+        "cidade_manifesto": r.cidade_manifesto,
+        "cidade_romaneio": r.cidade_romaneio,
+        "logistica": classificar_logistica(r),  # "rota" | "deposito" | None (não pendente)
         "ocorrencia": r.ocorrencia,
         "entregue": r.entregue,
         "data_comprovante": r.data_comprovante,
