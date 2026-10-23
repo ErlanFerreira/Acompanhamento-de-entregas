@@ -151,6 +151,10 @@ class HistoricoDia(Base):
     vencidos = Column(Integer, default=0)
     entregues_no_prazo = Column(Integer, default=0)
     entregues_fora = Column(Integer, default=0)
+    # Pendentes separados pelo manifesto/romaneio: em depósito (sem nenhum dos
+    # dois, parados) e em rota (com manifesto ou romaneio, até a baixa).
+    em_deposito = Column(Integer, default=0)
+    em_rota = Column(Integer, default=0)
     atualizado_em = Column(DateTime, default=datetime.datetime.utcnow)
 
 
@@ -169,6 +173,10 @@ class HistoricoTomador(Base):
     vencidos = Column(Integer, default=0)
     entregues_no_prazo = Column(Integer, default=0)
     entregues_fora = Column(Integer, default=0)
+    # Pendentes separados pelo manifesto/romaneio: em depósito (sem nenhum dos
+    # dois, parados) e em rota (com manifesto ou romaneio, até a baixa).
+    em_deposito = Column(Integer, default=0)
+    em_rota = Column(Integer, default=0)
 
 
 class TentativaLogin(Base):

@@ -196,7 +196,20 @@
         { k: "fora_prazo", label: "Entregues fora do prazo", value: fmtN(entreguesSerious), sub: entreguesTotal ? fmtPct(entreguesSerious / entreguesTotal) + " das entregas" : "—", cls: "serious" }
       ];
       // Clicar num card abre a tela com os CT-e dele (como na tela de Comprovantes).
-      const el = document.getElementById("kpis");
+      pintarTiles("kpis", tiles);
+
+      // Pendentes separados pelo manifesto/romaneio: sem nenhum dos dois estão
+      // parados no depósito; com um deles, em rota de entrega (até a baixa).
+      const deposito = rows.filter(emDeposito).length;
+      const rota = rows.filter(emRota).length;
+      pintarTiles("kpis-logistica", [
+        { k: "deposito", label: "Em depósito (parados)", value: fmtN(deposito), sub: pendentes ? fmtPct(deposito / pendentes) + " das pendentes · sem manifesto nem romaneio" : "sem manifesto nem romaneio", cls: "deposito" },
+        { k: "em_rota", label: "Em rota de entrega", value: fmtN(rota), sub: pendentes ? fmtPct(rota / pendentes) + " das pendentes · com manifesto ou romaneio, até a baixa" : "com manifesto ou romaneio, até a baixa", cls: "rota" }
+      ]);
+    }
+
+    function pintarTiles(elementoId, tiles) {
+      const el = document.getElementById(elementoId);
       el.innerHTML = tiles.map(t =>
         '<button type="button" class="stat-tile ' + t.cls + '" data-grupo="' + t.k + '" title="Ver os CT-e">' +
         '<div class="label">' + esc(t.label) + '</div><div class="value">' + t.value + '</div><div class="sub">' + esc(t.sub) + '</div></button>'
@@ -206,6 +219,10 @@
       }));
     }
 
+    // Pendente com manifesto ou romaneio = em rota; sem os dois = em depósito.
+    function emRota(r) { return r.status === "PE" && !!(r.manifesto || r.romaneio); }
+    function emDeposito(r) { return r.status === "PE" && !(r.manifesto || r.romaneio); }
+
     // ---- tela "#lista/<grupo>": CT-e do card clicado, agrupados por
     // tomador/consignatário (clientes recolhidos, CT-e e NF ao expandir). Respeita os
     // filtros do topo; o botão Voltar (ou o voltar do navegador) retorna ao
@@ -214,6 +231,8 @@
       total: { rotulo: "Total de CT-e", cor: "var(--text-muted)", filtro: () => true, desc: "todos os CT-e do filtro atual" },
       pendentes: { rotulo: "Pendentes de entrega", cor: "var(--status-warning)", filtro: r => r.status === "PE", desc: "carga ainda não entregue" },
       vencidas: { rotulo: "Pendentes com prazo vencido", cor: "var(--status-critical)", filtro: r => r.estado === "critical", desc: "não entregues e com o prazo vencido" },
+      deposito: { rotulo: "Em depósito (parados)", cor: "var(--series-2)", filtro: r => emDeposito(r), desc: "pendentes sem manifesto nem romaneio -- parados no depósito" },
+      em_rota: { rotulo: "Em rota de entrega", cor: "var(--series-1)", filtro: r => emRota(r), desc: "pendentes com manifesto ou romaneio -- em rota até a baixa" },
       no_prazo: { rotulo: "Entregues dentro do prazo", cor: "var(--status-good)", filtro: r => r.status === "DP", desc: "entregues dentro do prazo" },
       fora_prazo: { rotulo: "Entregues fora do prazo", cor: "var(--status-serious)", filtro: r => r.status === "FPE", desc: "entregues depois do prazo" }
     };

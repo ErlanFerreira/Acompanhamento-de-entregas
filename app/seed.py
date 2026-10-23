@@ -14,6 +14,14 @@ _COLUNAS_ADICIONADAS = {
         "serie": "VARCHAR(10)",
         "filial": "VARCHAR(60)",
     },
+    "historico_dia": {
+        "em_deposito": "INTEGER DEFAULT 0",
+        "em_rota": "INTEGER DEFAULT 0",
+    },
+    "historico_tomador": {
+        "em_deposito": "INTEGER DEFAULT 0",
+        "em_rota": "INTEGER DEFAULT 0",
+    },
     "bipagens": {
         "protocolo_id": "INTEGER",
     },

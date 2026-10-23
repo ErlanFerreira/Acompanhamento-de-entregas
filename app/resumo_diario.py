@@ -66,6 +66,9 @@ def coletar(db: Session, usuario: Usuario) -> dict | None:
         return None
     no_prazo = base.filter(Carga.status == "DP").count()
     fora = base.filter(Carga.status == "FPE").count()
+    # pendentes separados pelo manifesto/romaneio: parados no depósito x em rota
+    em_deposito = base.filter(historico.cond_em_deposito()).count()
+    em_rota = base.filter(historico.cond_em_rota()).count()
 
     atrasados = (
         base.filter(Carga.estado == "critical")
@@ -99,6 +102,7 @@ def coletar(db: Session, usuario: Usuario) -> dict | None:
     entregues = no_prazo + fora
     return {
         "pendentes": pendentes, "vencidos": vencidos, "maior_atraso": maior_atraso,
+        "em_deposito": em_deposito, "em_rota": em_rota,
         "pct_no_prazo": (no_prazo / entregues) if entregues else None, "entregues_fora": fora,
         "atrasados": [
             {
@@ -145,6 +149,8 @@ def renderizar(usuario: Usuario, dados: dict, hoje: datetime.date) -> tuple[str,
         f"- Pendentes de entrega: {dados['pendentes']}{_texto_variacao(var, 'pendentes')}",
         f"- Com prazo vencido: {dados['vencidos']}{_texto_variacao(var, 'vencidos')}",
     ]
+    linhas.append(f"  - parados no depósito (sem manifesto nem romaneio): {dados['em_deposito']}")
+    linhas.append(f"  - em rota de entrega (com manifesto ou romaneio): {dados['em_rota']}")
     if dados["maior_atraso"]:
         linhas.append(f"- Maior atraso: {dados['maior_atraso']} dia(s)")
     if dados["pct_no_prazo"] is not None:
@@ -175,6 +181,11 @@ def renderizar(usuario: Usuario, dados: dict, hoje: datetime.date) -> tuple[str,
     ]
     if dados["pct_no_prazo"] is not None:
         cards.append(card("Entregues no prazo", f"{dados['pct_no_prazo'] * 100:.1f}%".replace(".", ","), f"{dados['entregues_fora']} fora do prazo", "#1a9d3a"))
+
+    cards_logistica = [
+        card("Parados no depósito", str(dados["em_deposito"]), "sem manifesto nem romaneio", "#eb6834"),
+        card("Em rota de entrega", str(dados["em_rota"]), "com manifesto ou romaneio, até a baixa", "#2a78d6"),
+    ]
 
     th = 'style="text-align:left;padding:6px 8px;border-bottom:2px solid #e3e6ea;font-size:12px;color:#5a6472;"'
     td = 'style="padding:6px 8px;border-bottom:1px solid #eef0f3;font-size:13px;color:#1b2430;vertical-align:top;"'
@@ -213,6 +224,7 @@ def renderizar(usuario: Usuario, dados: dict, hoje: datetime.date) -> tuple[str,
         f'<div style="color:#5a6472;font-size:13px;margin-bottom:16px;">Resumo das entregas das suas empresas em {hoje.strftime("%d/%m/%Y")}'
         ' · CT-e do período sincronizado (até 90 dias)</div>'
         f'<table cellspacing="8" cellpadding="0" style="width:100%;border-collapse:separate;"><tr>{"".join(cards)}</tr></table>'
+        f'<table cellspacing="8" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:-4px;"><tr>{"".join(cards_logistica)}</tr></table>'
         f'{tabela_atrasados}{tabela_tomadores}'
         f'<p style="margin:24px 0 8px;"><a href="{e(link_venc)}" style="{botao}background:#c9352f;color:#fff;">Ver vencidas no Painel</a> '
         f'<a href="{e(link_pend)}" style="{botao}background:#eef0f3;color:#1b2430;">Todas as pendentes</a></p>'

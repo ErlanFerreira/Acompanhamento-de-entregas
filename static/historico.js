@@ -52,7 +52,8 @@
 
   function renderKpis(serie) {
     const el = document.getElementById("kpis");
-    if (!serie.length) { el.innerHTML = ""; return; }
+    const elLog = document.getElementById("kpis-logistica");
+    if (!serie.length) { el.innerHTML = ""; elLog.innerHTML = ""; return; }
     const hoje = serie[serie.length - 1];
     const ontem = serie.length > 1 ? serie[serie.length - 2] : null;
     const pct = pctNoPrazo(hoje), pctAntes = ontem ? pctNoPrazo(ontem) : null;
@@ -65,9 +66,18 @@
       { label: "Entregues fora do prazo", value: fmtN(hoje.entregues_fora), sub: dif(hoje.entregues_fora, ontem && ontem.entregues_fora), cls: "serious" },
       { label: "Total de CT-e", value: fmtN(hoje.total), sub: "na janela sincronizada · " + fmtDiaLongo(hoje.data), cls: "" }
     ];
-    el.innerHTML = tiles.map(t =>
+    const desenhar = (alvo, lista) => { alvo.innerHTML = lista.map(t =>
       '<div class="stat-tile ' + t.cls + '"><div class="label">' + esc(t.label) + '</div><div class="value">' + t.value + '</div><div class="sub">' + esc(t.sub) + '</div></div>'
-    ).join("");
+    ).join(""); };
+    desenhar(el, tiles);
+    // Pendentes separados pelo manifesto/romaneio (None = dia gravado antes dessa separação).
+    const semDado = hoje.em_deposito == null;
+    desenhar(elLog, [
+      { label: "Em depósito (parados)", value: semDado ? "—" : fmtN(hoje.em_deposito),
+        sub: semDado ? "sem dado neste dia" : dif(hoje.em_deposito, ontem && ontem.em_deposito == null ? null : ontem && ontem.em_deposito), cls: "deposito" },
+      { label: "Em rota de entrega", value: semDado ? "—" : fmtN(hoje.em_rota),
+        sub: semDado ? "sem dado neste dia" : dif(hoje.em_rota, ontem && ontem.em_rota == null ? null : ontem && ontem.em_rota), cls: "rota" }
+    ]);
   }
 
   // Gráfico de linhas em SVG: `linhas` = [{nome, cor, valores:[...]}] com um
@@ -197,6 +207,10 @@
       { nome: "Pendentes", cor: COR.pendentes, valores: serie.map(p => p.pendentes) },
       { nome: "Vencidos", cor: COR.vencidos, valores: serie.map(p => p.vencidos) }
     ], v => fmtN(Math.round(v)), "legend-pendentes");
+    desenharLinhas("chart-logistica", dias_, [
+      { nome: "Em depósito (parados)", cor: "var(--series-2)", valores: serie.map(p => p.em_deposito) },
+      { nome: "Em rota de entrega", cor: "var(--series-1)", valores: serie.map(p => p.em_rota) }
+    ], v => fmtN(Math.round(v)), "legend-logistica");
     desenharLinhas("chart-prazo", dias_, [
       { nome: "Entregues no prazo", cor: COR.prazo, valores: serie.map(p => { const v = pctNoPrazo(p); return v == null ? null : v * 100; }) }
     ], v => v.toFixed(1).replace(".", ",") + "%", "legend-prazo");
