@@ -61,7 +61,12 @@ async def lifespan(app: FastAPI):
     # A sincronização periódica roda via GitHub Actions (ver .github/workflows/sync.yml),
     # não dentro do processo web -- necessário porque a Vercel roda o app como função
     # serverless (sem processo de fundo de longa duração).
-    init_db_and_seed()
+    try:
+        init_db_and_seed()
+    except Exception:
+        # Falha ao preparar o banco (ex.: coluna nova que não deu pra criar) não
+        # pode tirar o site inteiro do ar -- só as telas que usam o que faltou.
+        logging.getLogger("startup").exception("Falha ao preparar o banco na inicialização (seguindo mesmo assim).")
     yield
 
 
