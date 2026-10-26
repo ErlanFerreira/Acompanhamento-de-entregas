@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy import inspect, text
 
-from .db import Base, engine
+from .db import TABELAS_CONSULTA, Base, engine, engine_consultas
 
 logger = logging.getLogger("seed")
 
@@ -59,5 +59,16 @@ def _adicionar_colunas_faltantes():
 
 
 def init_db_and_seed():
-    Base.metadata.create_all(bind=engine)
+    from . import models  # noqa: F401 (registra as tabelas no Base)
+
+    tabelas = Base.metadata.sorted_tables
+    if engine_consultas is not engine:
+        # Banco separado das consultas: as tabelas delas vão pra lá (primeiro,
+        # pra funcionarem mesmo que o banco principal esteja fora do ar).
+        try:
+            Base.metadata.create_all(bind=engine_consultas, tables=[t for t in tabelas if t.name in TABELAS_CONSULTA])
+        except Exception:
+            logger.exception("Não foi possível preparar o banco das consultas.")
+        tabelas = [t for t in tabelas if t.name not in TABELAS_CONSULTA]
+    Base.metadata.create_all(bind=engine, tables=tabelas)
     _adicionar_colunas_faltantes()

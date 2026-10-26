@@ -17,11 +17,37 @@ sair pelo mesmo IP.
 """
 
 import datetime
+import logging
+import time
 
 from fastapi import Request
 from sqlalchemy.orm import Session
 
 from .models import TentativaLogin
+
+logger = logging.getLogger("bloqueio_login")
+
+# Se o banco principal estiver fora do ar (ex.: cota de rede da Neon estourada),
+# o login do supervisor (senha geral) não pode travar esperando ele: a primeira
+# falha marca o banco como fora por 60 s e as chamadas seguintes nem tentam.
+# Nesse intervalo o bloqueio por senha errada fica desligado (só tem efeito
+# quando o banco responde).
+_BANCO_FORA_ATE = 0.0
+
+
+def _banco_fora() -> bool:
+    return time.monotonic() < _BANCO_FORA_ATE
+
+
+def _marcar_banco_fora(db: Session) -> None:
+    global _BANCO_FORA_ATE
+    _BANCO_FORA_ATE = time.monotonic() + 60
+    try:
+        db.rollback()
+    except Exception:
+        pass
+    logger.warning("Banco indisponível: bloqueio de login desligado por 60 s.", exc_info=True)
+
 
 JANELA_MINUTOS = 15
 BLOQUEIO_MINUTOS = 15
@@ -50,17 +76,32 @@ def minutos_bloqueado(db: Session, chaves: list[str]) -> int | None:
     """Minutos que faltam pro desbloqueio, se alguma das chaves estiver
     bloqueada; senão None."""
     agora = _agora()
-    ate = [
-        t.bloqueado_ate
-        for t in db.query(TentativaLogin).filter(TentativaLogin.chave.in_(chaves)).all()
-        if t.bloqueado_ate and t.bloqueado_ate > agora
-    ]
+    if _banco_fora():
+        return None
+    try:
+        ate = [
+            t.bloqueado_ate
+            for t in db.query(TentativaLogin).filter(TentativaLogin.chave.in_(chaves)).all()
+            if t.bloqueado_ate and t.bloqueado_ate > agora
+        ]
+    except Exception:
+        _marcar_banco_fora(db)
+        return None
     if not ate:
         return None
     return max(1, int((max(ate) - agora).total_seconds() // 60) + 1)
 
 
 def registrar_falha(db: Session, chaves: list[str]) -> None:
+    if _banco_fora():
+        return
+    try:
+        _registrar_falha(db, chaves)
+    except Exception:
+        _marcar_banco_fora(db)
+
+
+def _registrar_falha(db: Session, chaves: list[str]) -> None:
     agora = _agora()
     for chave in chaves:
         t = db.query(TentativaLogin).filter(TentativaLogin.chave == chave).first()
@@ -78,8 +119,13 @@ def registrar_falha(db: Session, chaves: list[str]) -> None:
 
 def limpar(db: Session, chaves: list[str]) -> None:
     """Zera os contadores (login certo, ou desbloqueio pelo supervisor)."""
-    db.query(TentativaLogin).filter(TentativaLogin.chave.in_(chaves)).delete(synchronize_session=False)
-    db.commit()
+    if _banco_fora():
+        return
+    try:
+        db.query(TentativaLogin).filter(TentativaLogin.chave.in_(chaves)).delete(synchronize_session=False)
+        db.commit()
+    except Exception:
+        _marcar_banco_fora(db)
 
 
 def bloqueios_de_usuarios(db: Session) -> dict[str, datetime.datetime]:

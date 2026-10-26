@@ -24,6 +24,7 @@ jobs:
       - run: python scripts/run_consulta.py "${{ inputs.job_id }}"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONSULTAS_DATABASE_URL: ${{ secrets.CONSULTAS_DATABASE_URL }}  # banco separado das consultas (opcional)
           PORTAL_EMAIL: ${{ secrets.PORTAL_EMAIL }}
           PORTAL_SENHA: ${{ secrets.PORTAL_SENHA }}
 

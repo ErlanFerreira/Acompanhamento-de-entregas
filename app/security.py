@@ -101,7 +101,12 @@ def _carregar_sessao(request: Request) -> dict | None:
         # trocadas) vale na hora, sem esperar o cookie expirar.
         db = SessionLocal()
         try:
-            u = db.get(Usuario, data.get("uid"))
+            try:
+                u = db.get(Usuario, data.get("uid"))
+            except Exception:
+                # Banco principal fora do ar: não dá pra confirmar o analista
+                # (o supervisor segue entrando pela senha geral).
+                return None
             if not u or not u.ativo:
                 return None
             data["usuario"] = {
