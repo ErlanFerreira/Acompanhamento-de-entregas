@@ -64,6 +64,28 @@ def _adicionar_colunas_faltantes(so_separado: bool = False):
                 logger.exception("Não foi possível criar a coluna %s.%s", tabela, nome)
 
 
+# Banco principal novo (vazio): os ids começam altos, pra que a cópia dos dados
+# do banco antigo (scripts/migrar_banco_antigo.py) mantenha os ids originais
+# sem colidir -- o número do protocolo de faturas é o que o cliente recebe.
+_PRIMEIRO_ID_PRINCIPAL = {"protocolos_fatura": 1000}
+_PRIMEIRO_ID_PADRAO = 1_000_000
+_SEM_AJUSTE_DE_ID = {"cargas"}  # copiadas pelo id_cte, sem manter o id
+
+
+def _ids_altos_em_tabelas_novas(novas: set[str]) -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    for tabela in Base.metadata.sorted_tables:
+        if tabela.name not in novas or tabela.name in _SEM_AJUSTE_DE_ID or "id" not in tabela.c:
+            continue
+        inicio = _PRIMEIRO_ID_PRINCIPAL.get(tabela.name, _PRIMEIRO_ID_PADRAO)
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER SEQUENCE {tabela.name}_id_seq RESTART WITH {inicio}"))
+        except Exception:
+            logger.exception("Não foi possível ajustar o primeiro id de %s.", tabela.name)
+
+
 def init_db_and_seed():
     from . import models  # noqa: F401 (registra as tabelas no Base)
 
@@ -78,5 +100,8 @@ def init_db_and_seed():
         except Exception:
             logger.exception("Não foi possível preparar o banco separado.")
         tabelas = [t for t in tabelas if t.name not in TABELAS_SEPARADAS]
+    existentes = set(inspect(engine).get_table_names())
     Base.metadata.create_all(bind=engine, tables=tabelas)
+    if not existentes:  # banco principal vazio = banco novo
+        _ids_altos_em_tabelas_novas({t.name for t in tabelas})
     _adicionar_colunas_faltantes()

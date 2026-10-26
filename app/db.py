@@ -26,8 +26,7 @@ engine = _criar_engine(config.DATABASE_URL)
 #   - login dos analistas (usuarios, tentativas_login) e tratativas de
 #     comprovante -- o analista entra mesmo com o principal fora, e o
 #     histórico das tratativas fica preservado.
-# Ao ligar o banco separado com dados já no principal, copie-os com
-# scripts/migrar_banco_separado.py.
+# Dados que ficaram num banco anterior: copie com scripts/migrar_banco_antigo.py.
 _url_separado = _url(os.environ.get("CONSULTAS_DATABASE_URL", "").strip())
 engine_separado = _criar_engine(_url_separado) if _url_separado else engine
 engine_consultas = engine_separado  # nome antigo (scripts/run_consulta.py)
