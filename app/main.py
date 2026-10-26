@@ -386,22 +386,29 @@ def _tratativa_to_dict(t: TratativaComprovante) -> dict:
     }
 
 
-def _filtro_tratativas(empresas: set[str]):
-    """Tratativas de CT-e das empresas do analista -- pelo CT-e sincronizado
-    ou, se ele já saiu da janela, pelo cliente gravado no lançamento."""
-    ids = select(Carga.id_cte).where(_filtro_empresas(empresas))
-    return or_(TratativaComprovante.id_cte.in_(ids), _nome_empresa(TratativaComprovante.cliente).in_(list(empresas) or [""]))
+def _tratativas_do_analista(db: Session, empresas: set[str], tratativas: list[TratativaComprovante]) -> list[TratativaComprovante]:
+    """Só as tratativas de CT-e das empresas do analista -- pelo CT-e
+    sincronizado ou, se ele já saiu da janela, pelo cliente gravado no
+    lançamento. As tratativas podem estar em outro banco que os CT-e (ver
+    app/db.py), então a conferência é feita aqui e não num JOIN/subconsulta."""
+    ids = {t.id_cte for t in tratativas}
+    visiveis: set[str] = set()
+    if ids:
+        try:
+            visiveis = {i for (i,) in db.query(Carga.id_cte).filter(Carga.id_cte.in_(ids), _filtro_empresas(empresas))}
+        except SQLAlchemyError:
+            db.rollback()  # banco principal fora do ar: sobra o filtro pelo cliente
+    return [t for t in tratativas if t.id_cte in visiveis or (t.cliente or "").strip().upper() in empresas]
 
 
 @app.get("/api/tratativas", dependencies=[Depends(require_acesso_completo_api)])
 def api_tratativas(request: Request, db: Session = Depends(get_db)):
     """As tratativas lançadas (são poucas, digitadas à mão) -- a tela agrupa
     por CT-e e busca por CT-e/NF no navegador."""
-    q = db.query(TratativaComprovante)
+    rows = db.query(TratativaComprovante).order_by(TratativaComprovante.criado_em.asc()).all()
     empresas = escopo_empresas(request)
     if empresas is not None:
-        q = q.filter(_filtro_tratativas(empresas))
-    rows = q.order_by(TratativaComprovante.criado_em.asc()).all()
+        rows = _tratativas_do_analista(db, empresas, rows)
     return {"tratativas": [_tratativa_to_dict(t) for t in rows]}
 
 
@@ -439,14 +446,12 @@ def api_tratativas_registrar(request: Request, payload: dict, db: Session = Depe
 @app.delete("/api/tratativas/{tratativa_id}", dependencies=[Depends(require_acesso_completo_api)])
 def api_tratativas_remover(request: Request, tratativa_id: int, db: Session = Depends(get_db)):
     """Apaga um lançamento feito por engano."""
-    q = db.query(TratativaComprovante).filter(TratativaComprovante.id == tratativa_id)
+    t = db.get(TratativaComprovante, tratativa_id)
     empresas = escopo_empresas(request)
-    if empresas is not None:
-        q = q.filter(_filtro_tratativas(empresas))
-    apagados = q.delete(synchronize_session=False)
-    db.commit()
-    if not apagados:
+    if not t or (empresas is not None and not _tratativas_do_analista(db, empresas, [t])):
         return JSONResponse({"erro": "Tratativa não encontrada."}, status_code=404)
+    db.delete(t)
+    db.commit()
     return {"ok": True}
 
 

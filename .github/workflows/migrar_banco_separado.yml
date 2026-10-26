@@ -1,0 +1,30 @@
+name: Migrar pro banco separado
+
+# Copia analistas e tratativas do banco principal pro separado
+# (scripts/migrar_banco_separado.py). Rodar à mão, com o banco principal no ar;
+# pode rodar de novo sem duplicar nada.
+on:
+  workflow_dispatch:
+    inputs:
+      simular:
+        description: "Só mostrar o que seria copiado (não grava nada)"
+        type: boolean
+        default: false
+
+jobs:
+  migrar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - run: python scripts/migrar_banco_separado.py ${{ inputs.simular && '--simular' || '' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONSULTAS_DATABASE_URL: ${{ secrets.CONSULTAS_DATABASE_URL }}

@@ -29,6 +29,7 @@ jobs:
       - run: python scripts/enviar_resumos.py --login "${{ inputs.login }}"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONSULTAS_DATABASE_URL: ${{ secrets.CONSULTAS_DATABASE_URL }}  # banco separado: os analistas (e-mails) ficam lá
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USUARIO: ${{ secrets.SMTP_USUARIO }}

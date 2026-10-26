@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy import inspect, text
 
-from .db import TABELAS_CONSULTA, Base, engine, engine_consultas
+from .db import TABELAS_SEPARADAS, Base, criar_tabelas_separadas, engine, engine_da_tabela, engine_separado
 
 logger = logging.getLogger("seed")
 
@@ -40,18 +40,24 @@ _COLUNAS_ADICIONADAS = {
 }
 
 
-def _adicionar_colunas_faltantes():
-    insp = inspect(engine)
-    # No Postgres "IF NOT EXISTS" evita erro quando duas instâncias (a função
-    # da Vercel e o GitHub Actions) tentam criar a mesma coluna ao mesmo tempo.
-    se_nao_existe = "IF NOT EXISTS " if engine.dialect.name == "postgresql" else ""
+def _adicionar_colunas_faltantes(so_separado: bool = False):
     for tabela, colunas in _COLUNAS_ADICIONADAS.items():
-        existentes = {c["name"] for c in insp.get_columns(tabela)}
+        eng = engine_da_tabela(tabela)  # usuarios pode estar no banco separado
+        if so_separado and eng is engine:
+            continue
+        try:
+            existentes = {c["name"] for c in inspect(eng).get_columns(tabela)}
+        except Exception:
+            logger.exception("Não foi possível ler as colunas de %s.", tabela)
+            continue
+        # No Postgres "IF NOT EXISTS" evita erro quando duas instâncias (a função
+        # da Vercel e o GitHub Actions) tentam criar a mesma coluna ao mesmo tempo.
+        se_nao_existe = "IF NOT EXISTS " if eng.dialect.name == "postgresql" else ""
         for nome, tipo in colunas.items():
             if nome in existentes:
                 continue
             try:
-                with engine.begin() as conn:
+                with eng.begin() as conn:
                     conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN {se_nao_existe}{nome} {tipo}"))
             except Exception:
                 # Uma coluna que não deu pra criar não pode derrubar o resto.
@@ -62,13 +68,15 @@ def init_db_and_seed():
     from . import models  # noqa: F401 (registra as tabelas no Base)
 
     tabelas = Base.metadata.sorted_tables
-    if engine_consultas is not engine:
-        # Banco separado das consultas: as tabelas delas vão pra lá (primeiro,
-        # pra funcionarem mesmo que o banco principal esteja fora do ar).
+    if engine_separado is not engine:
+        # Banco separado (consultas, login dos analistas, tratativas): as
+        # tabelas dele vão pra lá primeiro, pra funcionarem mesmo que o banco
+        # principal esteja fora do ar.
         try:
-            Base.metadata.create_all(bind=engine_consultas, tables=[t for t in tabelas if t.name in TABELAS_CONSULTA])
+            criar_tabelas_separadas()
+            _adicionar_colunas_faltantes(so_separado=True)
         except Exception:
-            logger.exception("Não foi possível preparar o banco das consultas.")
-        tabelas = [t for t in tabelas if t.name not in TABELAS_CONSULTA]
+            logger.exception("Não foi possível preparar o banco separado.")
+        tabelas = [t for t in tabelas if t.name not in TABELAS_SEPARADAS]
     Base.metadata.create_all(bind=engine, tables=tabelas)
     _adicionar_colunas_faltantes()
