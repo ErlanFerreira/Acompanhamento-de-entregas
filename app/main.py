@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem
@@ -72,6 +73,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(historico.router)
+
+
+@app.exception_handler(SQLAlchemyError)
+async def erro_de_banco(request: Request, exc: SQLAlchemyError):
+    """Banco fora do ar ou com problema: responde com a causa (só a mensagem
+    do driver, sem o SQL) em vez de um "Internal Server Error" sem explicação."""
+    logging.getLogger("banco").exception("Erro de banco em %s", request.url.path)
+    if request.url.path.startswith("/api/"):
+        detalhe = " ".join(str(getattr(exc, "orig", exc)).split())[:300]
+        return JSONResponse({"erro": f"Banco de dados indisponível ou com problema: {detalhe}"}, status_code=503)
+    return HTMLResponse("<h1>Banco de dados indisponível</h1><p>Tente de novo em alguns minutos.</p>", status_code=503)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 # Usados no menu (base.html): esconder as telas restritas de quem entrou pelo

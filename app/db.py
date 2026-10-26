@@ -27,6 +27,21 @@ engine_consultas = _criar_engine(_url_consultas) if _url_consultas else engine
 TABELAS_CONSULTA = {"consulta_jobs", "consulta_itens"}
 
 
+_tabelas_consulta_ok = False
+
+
+def garantir_tabelas_consulta() -> None:
+    """Cria as tabelas das consultas no banco delas, uma vez por processo, na
+    primeira vez que alguém as usa. A criação na subida do app (seed.py) pode
+    não rodar (ex.: a função da Vercel sobe sem executar o lifespan)."""
+    global _tabelas_consulta_ok
+    if _tabelas_consulta_ok or engine_consultas is engine:
+        return
+    tabelas = [t for t in Base.metadata.sorted_tables if t.name in TABELAS_CONSULTA]
+    Base.metadata.create_all(bind=engine_consultas, tables=tabelas)
+    _tabelas_consulta_ok = True
+
+
 class SessaoRoteada(Session):
     """Uma sessão só pro código inteiro: as tabelas de consulta vão pro banco
     das consultas e todo o resto pro principal."""
@@ -35,6 +50,7 @@ class SessaoRoteada(Session):
         if engine_consultas is not engine and mapper is not None:
             tabela = getattr(mapper, "local_table", None)
             if tabela is not None and tabela.name in TABELAS_CONSULTA:
+                garantir_tabelas_consulta()
                 return engine_consultas
         return super().get_bind(mapper=mapper, clause=clause, **kw)
 

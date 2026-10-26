@@ -14,6 +14,15 @@
     erro: "Erro",
   };
 
+  // Resposta do servidor como objeto; se não vier JSON (ex.: "Internal Server
+  // Error"), devolve uma mensagem com o código e o começo do texto.
+  async function lerJson(resp) {
+    const texto = await resp.text();
+    try { return JSON.parse(texto); } catch (e) {
+      return { erro: "Erro " + resp.status + " no servidor" + (texto ? ": " + texto.slice(0, 120) : "") };
+    }
+  }
+
   function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
 
   fArquivo.addEventListener("change", function () {
@@ -31,7 +40,7 @@
       const fd = new FormData();
       fd.append("arquivo", arquivoSelecionado);
       const resp = await fetch("/api/consultas", { method: "POST", credentials: "same-origin", body: fd });
-      const body = await resp.json();
+      const body = await lerJson(resp);
       if (!resp.ok) throw new Error(body.erro || "Falha ao enviar.");
       uploadStatus.textContent = `Consulta enviada (${body.total_itens} NFs). Acompanhe abaixo -- isso pode levar de alguns minutos até cerca de 1 hora para planilhas grandes.`;
       fArquivo.value = "";
@@ -108,7 +117,12 @@
   async function loadJobs() {
     const resp = await fetch("/api/consultas", { credentials: "same-origin" });
     if (resp.status === 401) { window.location.href = "/login"; return []; }
-    const body = await resp.json();
+    const body = await lerJson(resp);
+    if (!resp.ok) {
+      document.getElementById("jobs-body").innerHTML =
+        '<tr><td colspan="6"><div class="empty-state">' + esc(body.erro || "Não foi possível carregar as consultas.") + '</div></td></tr>';
+      return [];
+    }
     renderJobs(body.jobs || []);
     return body.jobs || [];
   }
