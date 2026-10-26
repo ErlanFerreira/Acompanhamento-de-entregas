@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.db import SessionLocal  # noqa: E402
+from app.db import SessionLocal, engine, engine_consultas  # noqa: E402
 from app.models import ConsultaItem, ConsultaJob  # noqa: E402
 from app.scrape import consultar_notas_fiscais, empresa_confere  # noqa: E402
 
@@ -47,6 +47,13 @@ def _filtrar_por_parceiro(matches: list[dict], nomes_esperados: list[str]) -> li
 
 
 def main(job_id: int):
+    # Anotação do run no GitHub: confirma que o robô usa o banco separado das
+    # consultas (o secret CONSULTAS_DATABASE_URL) e não o principal.
+    if engine_consultas is engine:
+        print("::warning title=Banco das consultas::CONSULTAS_DATABASE_URL não chegou ao robô -- usando o banco principal. "
+              "Confira se é um Secret de repositório (Settings > Secrets and variables > Actions > Secrets).")
+    else:
+        print("::notice title=Banco das consultas::usando o banco separado das consultas.")
     db = SessionLocal()
     try:
         job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
