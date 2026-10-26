@@ -965,6 +965,7 @@ def _job_to_dict(job: ConsultaJob) -> dict:
         # exibe 3h adiantado (sem descontar o fuso de Brasília).
         "criado_em": job.criado_em.isoformat() + "Z" if job.criado_em else None,
         "nome_arquivo": job.nome_arquivo,
+        "coluna_nf": job.coluna_nf,  # coluna(s) de NF detectada(s), mostrada na tabela
         "status": job.status,
         "total_itens": job.total_itens,
         "processados": job.processados,
