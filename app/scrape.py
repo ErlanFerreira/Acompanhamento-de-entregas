@@ -376,7 +376,7 @@ def _extrair_nomes_por_cte(html: str) -> dict[str, dict]:
     for idconhecimento, _filial_col, _consig, remetente, destinatario in _LINHA_RE.findall(html):
         cte = popimgs.get(idconhecimento)
         if cte:
-            nomes[cte] = {"remetente": remetente.strip(), "destinatario": destinatario.strip()}
+            nomes[cte] = {"consignatario": _consig.strip(), "remetente": remetente.strip(), "destinatario": destinatario.strip()}
     return nomes
 
 
@@ -397,6 +397,7 @@ def _ler_resultado(page: Page) -> list[dict]:
     nomes_por_cte = _extrair_nomes_por_cte(page.content())
     for r in resultado:
         nomes = nomes_por_cte.get(r["cte"]) or {}
+        r["consignatario"] = nomes.get("consignatario")
         r["remetente"] = nomes.get("remetente")
         r["destinatario"] = nomes.get("destinatario")
     return resultado
@@ -525,14 +526,36 @@ _SUFIXOS_EMPRESA = {
 }
 
 
+def _tokens_nome(s: str) -> list[str]:
+    """Palavras do nome em maiúsculas, sem acento, sem sufixos societários."""
+    sem_acento = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().upper()
+    # "S/A", "S.A." e "S A" viram "SA": senão o "S" e o "A" ficavam como
+    # palavras soltas e "CONDICIONADO S A" não batia com "CONDICIONADO LTDA".
+    sem_acento = re.sub(r"\bS\s*[/.]?\s*A\b\.?", "SA", sem_acento)
+    palavras = [p for p in re.split(r"[^A-Za-z0-9]+", sem_acento) if p]
+    return [p for p in palavras if p not in _SUFIXOS_EMPRESA]
+
+
 def _normalizar_nome(s: str) -> str:
     """Maiúsculas, sem acento, sem espaço/pontuação, descartando sufixos
     societários comuns -- pra comparar "Iquine" com "TINTAS IQUINE
     INDUSTRIA E COMERCIO LTDA" de forma tolerante."""
-    sem_acento = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
-    palavras = [p for p in re.split(r"[^A-Za-z0-9]+", sem_acento.upper()) if p]
-    palavras = [p for p in palavras if p not in _SUFIXOS_EMPRESA]
-    return "".join(palavras)
+    return "".join(_tokens_nome(s))
+
+
+def nomes_conferem(a: str, b: str) -> bool:
+    """Os dois nomes são da mesma empresa? Tolerante a sufixo societário
+    (LTDA, S/A...), a acento e a nome parcial: vale se as palavras de um
+    estão todas no outro ("RIQUENA NETO" em "RIQUENA NETO AR CONDICIONADO
+    LTDA") ou se um contém o outro."""
+    ta, tb = _tokens_nome(a), _tokens_nome(b)
+    if not ta or not tb:
+        return False
+    menor, maior = (set(ta), set(tb)) if len(set(ta)) <= len(set(tb)) else (set(tb), set(ta))
+    if len("".join(menor)) >= 4 and menor <= maior:
+        return True
+    na, nb = "".join(ta), "".join(tb)
+    return min(len(na), len(nb)) >= 4 and (na in nb or nb in na)
 
 
 def empresa_confere(candidatos: list[str], remetente: str, destinatario: str) -> bool:

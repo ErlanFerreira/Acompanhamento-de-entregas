@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db import SessionLocal, engine, engine_consultas  # noqa: E402
 from app.models import ConsultaItem, ConsultaJob  # noqa: E402
-from app.scrape import TEXTOS_SEM_RESULTADO, consultar_notas_fiscais, empresa_confere  # noqa: E402
+from app.scrape import TEXTOS_SEM_RESULTADO, consultar_notas_fiscais, nomes_conferem  # noqa: E402
 
 
 def _nomes_esperados(item: ConsultaItem) -> list[str]:
@@ -28,22 +28,31 @@ def _nomes_esperados(item: ConsultaItem) -> list[str]:
         return []
 
 
+def _pontos(m: dict, nomes_esperados: list[str]) -> int:
+    """Quantas partes do CT-e (consignatário/tomador, remetente, destinatário)
+    batem com algum dos nomes que a planilha informou."""
+    partes = [m.get("consignatario"), m.get("remetente"), m.get("destinatario")]
+    return sum(1 for p in partes if p and any(nomes_conferem(n, p) for n in nomes_esperados))
+
+
 def _filtrar_por_parceiro(matches: list[dict], nomes_esperados: list[str]) -> list[dict]:
-    """Descarta CT-e cujo remetente/destinatário não bate com o que a
-    planilha informou -- o número da NF sozinho não é único, então sem
-    essa checagem podíamos anexar informação de outro cliente."""
+    """Confirma que o CT-e achado pela NF é do cliente da planilha -- o número
+    da NF sozinho não é único, então sem essa checagem podíamos anexar
+    informação de outro cliente.
+
+    Basta UMA das partes (consignatário/tomador, remetente ou destinatário)
+    bater com algum dos nomes da planilha (consignatário, tomador, remetente,
+    destinatário ou cliente); com vários CT-e para a mesma NF, ficam só os que
+    batem em mais partes. Nomes são comparados de forma tolerante (LTDA, S/A,
+    acento, nome parcial)."""
     if not nomes_esperados:
         return matches  # planilha não tem colunas pra validar -- mantém como antes
-    validos = []
-    for m in matches:
-        rem, dest = m.get("remetente"), m.get("destinatario")
-        if not rem and not dest:
-            # não deu pra extrair nome desse CT-e (ex: tipo != "Normal") --
-            # não dá pra invalidar por falta de dado, mantém.
-            validos.append(m)
-        elif empresa_confere(nomes_esperados, rem or "", dest or ""):
-            validos.append(m)
-    return validos
+    sem_nome = [m for m in matches if not (m.get("consignatario") or m.get("remetente") or m.get("destinatario"))]
+    pontuados = [(m, _pontos(m, nomes_esperados)) for m in matches if m not in sem_nome]
+    melhor = max([p for _, p in pontuados] or [0])
+    validos = [m for m, p in pontuados if p >= 1 and p == melhor]
+    # CT-e sem nome extraível (ex: tipo != "Normal") não dá pra invalidar: mantém.
+    return validos + sem_nome
 
 
 def main(job_id: int):
@@ -98,8 +107,8 @@ def main(job_id: int):
                     t = todos[0]
                     item.observacao = (
                         f"NF localizada em {len(todos)} CT-e, mas de outro cliente "
-                        f"(ex.: CT-e {t.get('cte')} -- remetente: {t.get('remetente') or '?'} / "
-                        f"destinatário: {t.get('destinatario') or '?'}). "
+                        f"(ex.: CT-e {t.get('cte')} -- consignatário: {t.get('consignatario') or '?'} / "
+                        f"remetente: {t.get('remetente') or '?'} / destinatário: {t.get('destinatario') or '?'}). "
                         f"Cliente(s) na planilha: {', '.join(nomes)}"
                     )[:900]
                 else:

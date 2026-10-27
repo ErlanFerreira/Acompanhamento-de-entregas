@@ -1226,6 +1226,11 @@ def _detectar_coluna_tomador(cabecalho: list[str]) -> str | None:
     return _detectar_coluna(cabecalho, lambda n: re.search(r"\btomador\b|\bpagador\b", n) is not None)
 
 
+def _detectar_coluna_consignatario(cabecalho: list[str]) -> str | None:
+    """Consignatário (o tomador na tela do GW) -- ex: "Consignatário"."""
+    return _detectar_coluna(cabecalho, lambda n: re.search(r"\bconsignat", n) is not None)
+
+
 def _detectar_coluna_cliente(cabecalho: list[str]) -> str | None:
     """Fallback quando a planilha nem separa remetente/destinatário/tomador
     -- só tem uma coluna genérica "Cliente" dizendo de quem é o embarque."""
@@ -1273,6 +1278,7 @@ async def api_consultas_create(
             _detectar_coluna_remetente(cabecalho),
             _detectar_coluna_destinatario(cabecalho),
             _detectar_coluna_tomador(cabecalho),
+            _detectar_coluna_consignatario(cabecalho),
             _detectar_coluna_cliente(cabecalho),
         ]
 
