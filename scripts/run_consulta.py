@@ -28,9 +28,12 @@ def _nomes_esperados(item: ConsultaItem) -> list[str]:
         return []
 
 
-# Quantos nomes da planilha precisam bater com partes do CT-e pra confirmar que
-# é a nota procurada (o número da NF sozinho não basta: não é único).
-MINIMO_CONFIRMACOES = 2
+# Confirmações pra aceitar o CT-e: o número da NF (a própria busca no GW já é
+# feita por ele) + pelo menos UM nome da MESMA linha da planilha batendo com
+# uma parte do CT-e. O número da NF sozinho não basta (não é único), mas NF +
+# remetente, ou NF + consignatário/tomador, já identificam a nota -- e permitem
+# enviar planilhas do mesmo fornecedor com notas diferentes.
+MINIMO_CONFIRMACOES = 1
 
 
 def _nomes_distintos(nomes: list[str]) -> list[str]:
@@ -60,12 +63,11 @@ def _filtrar_por_parceiro(matches: list[dict], nomes_esperados: list[str]) -> li
     da NF sozinho não é único, então sem essa checagem podíamos anexar
     informação de outro cliente.
 
-    Pelo menos DOIS nomes diferentes da planilha (consignatário, tomador,
-    remetente, destinatário ou cliente) precisam bater com partes do CT-e
-    (consignatário/tomador, remetente, destinatário) -- ou todos, se a
-    planilha só tem um nome. Com vários CT-e para a mesma NF, ficam só os que
-    batem mais. Nomes são comparados de forma tolerante (LTDA, S/A, acento,
-    nome parcial)."""
+    Vale a linha: o número da NF + pelo menos um nome DA LINHA (consignatário,
+    tomador, remetente, destinatário ou cliente) batendo com uma parte do CT-e
+    (consignatário/tomador, remetente ou destinatário). Com vários CT-e para a
+    mesma NF, ficam só os que batem em mais nomes. Nomes são comparados de
+    forma tolerante (LTDA, S/A, acento, nome parcial)."""
     if not nomes_esperados:
         return matches  # planilha não tem colunas pra validar -- mantém como antes
     nomes = _nomes_distintos(nomes_esperados)
