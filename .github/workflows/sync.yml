@@ -19,6 +19,13 @@ jobs:
 
       - run: pip install -r requirements-sync.txt
 
+      # O download do Chromium varia muito de duração (de 30 s a 6 min); guardar
+      # o navegador em cache evita baixá-lo a cada execução.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements-sync.txt') }}
+
       - run: python -m playwright install --with-deps chromium
 
       - run: python scripts/run_sync.py
