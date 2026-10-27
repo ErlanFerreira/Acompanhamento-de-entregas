@@ -82,6 +82,11 @@ def main(job_id: int):
                 continue
 
             matches = resultados.get(item.nf_numero, [])
+            if matches is None:
+                # a consulta dessa NF falhou no portal (diferente de "não encontrada")
+                item.encontrado = False
+                item.erro = "Falha ao consultar no portal"
+                continue
             matches = _filtrar_por_parceiro(matches, _nomes_esperados(item))
             if not matches:
                 item.encontrado = False

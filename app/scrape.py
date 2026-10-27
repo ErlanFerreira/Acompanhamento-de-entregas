@@ -380,6 +380,19 @@ def _extrair_nomes_por_cte(html: str) -> dict[str, dict]:
     return nomes
 
 
+def _ler_resultado(page: Page) -> list[dict]:
+    """Lê o resultado da consulta de NF que está na tela (CT-e achados, com
+    remetente/destinatário de cada um)."""
+    texto = page.eval_on_selector("#formBx", "el => el.innerText")
+    resultado = _parse_resultado(texto)
+    nomes_por_cte = _extrair_nomes_por_cte(page.content())
+    for r in resultado:
+        nomes = nomes_por_cte.get(r["cte"]) or {}
+        r["remetente"] = nomes.get("remetente")
+        r["destinatario"] = nomes.get("destinatario")
+    return resultado
+
+
 def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, list[dict]]:
     """Faz login uma vez e consulta cada número de NF na tela "Consulta
     Entrega" do portal Webtrans, reaproveitando a mesma página/sessão.
@@ -415,7 +428,10 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
             # da conta) estiver logado ao mesmo tempo no navegador normal,
             # essa navegação volta com HTTP 401 em vez do formulário.
             for _tentativa in range(3):
-                resposta = page.goto(CONSULTA_ENTREGA_URL, wait_until="networkidle")
+                try:
+                    resposta = page.goto(CONSULTA_ENTREGA_URL, wait_until="networkidle", timeout=60_000)
+                except PlaywrightTimeoutError:
+                    resposta = None  # o portal não "assenta"; o formulário é esperado logo abaixo
                 if resposta is not None and resposta.status == 401:
                     if _tentativa == 2:
                         _salvar_debug(page, "consulta_entrega")
@@ -437,25 +453,34 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
             page.check("#tipoFiltro2")
             page.uncheck("#chkNaoEntregue")
 
+            falhas = 0
             for i, numero in enumerate(numeros_nf, start=1):
                 try:
                     page.fill("#valorConsultaNota", str(numero))
                     page.click("#visualizar")
                     page.wait_for_timeout(1200)
-                    page.wait_for_load_state("networkidle")
-                    texto = page.eval_on_selector("#formBx", "el => el.innerText")
-                    resultado = _parse_resultado(texto)
-                    nomes_por_cte = _extrair_nomes_por_cte(page.content())
-                    for r in resultado:
-                        nomes = nomes_por_cte.get(r["cte"]) or {}
-                        r["remetente"] = nomes.get("remetente")
-                        r["destinatario"] = nomes.get("destinatario")
+                    # O portal às vezes nunca fica ocioso: esperar o "networkidle"
+                    # padrão (30 s) por NF deixava a consulta lentíssima e ainda
+                    # dava a NF como não encontrada. Espera até 5 s e lê.
+                    _aguardar_ocioso(page, 5_000)
+                    resultado = _ler_resultado(page)
+                    if not resultado:
+                        # a resposta pode não ter chegado ainda: segunda leitura
+                        # antes de concluir "não encontrada"
+                        page.wait_for_timeout(3000)
+                        resultado = _ler_resultado(page)
                     resultados[numero] = resultado
-                except Exception:
+                except Exception as exc:
+                    falhas += 1
+                    if falhas <= 3:  # anotação do run no GitHub: mostra a causa sem abrir o log
+                        print(f"::warning title=NF {numero} falhou::{type(exc).__name__}: {' '.join(str(exc).split())[:200]}")
                     logger.exception("Falha ao consultar NF %s", numero)
-                    resultados[numero] = []
+                    resultados[numero] = None  # None = a consulta falhou (diferente de [] = não encontrada)
                 if progresso:
                     progresso(i, total)
+            achadas = sum(1 for r in resultados.values() if r)
+            print(f"::notice title=Consulta de NFs::{achadas} com resultado, "
+                  f"{total - achadas - falhas} sem resultado, {falhas} com falha de {total}")
         finally:
             _logout(page)
             browser.close()

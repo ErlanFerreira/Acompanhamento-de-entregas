@@ -1233,7 +1233,8 @@ def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
         total_colunas = max_col_original + len(_COLUNAS_NOVAS)
 
         def _escrever_resultado(linha_planilha: int, item: ConsultaItem, ws=ws, max_col_original=max_col_original):
-            valores = [item.cte, item.status_entrega, item.previsao_entrega, item.data_entrega, "Sim" if item.encontrado else "Não"]
+            valores = [item.cte, item.status_entrega, item.previsao_entrega, item.data_entrega,
+                       "Sim" if item.encontrado else ("Falha na consulta" if item.erro else "Não")]
             for offset, valor in enumerate(valores, start=1):
                 celula = ws.cell(row=linha_planilha, column=max_col_original + offset, value=valor)
                 celula.fill = _FILL_DADOS_GW
