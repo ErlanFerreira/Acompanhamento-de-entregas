@@ -145,9 +145,20 @@
       if (!custom && precisaRecarregar(this.value)) { recarregarCom(this.value); return; }
       render();
     });
+    // Digitando o ano o campo de data passa por valores válidos (0002, 0020,
+    // 0202...) e dispara "change" a cada um: sem esperar, a página recarregava
+    // no meio da digitação. Só age com ano plausível e depois de uma pausa.
+    function dataValida(v) {
+      return !v || (/^\d{4}-\d{2}-\d{2}$/.test(v) && +v.slice(0, 4) >= 2000 && +v.slice(0, 4) <= 2100);
+    }
+    let datasTimer;
     function aoMudarDatas() {
-      if (precisaRecarregar("custom", dateFromEl.value)) { recarregarCom("custom", dateFromEl.value, dateToEl.value); return; }
-      render();
+      clearTimeout(datasTimer);
+      if (!dataValida(dateFromEl.value) || !dataValida(dateToEl.value)) return;
+      datasTimer = setTimeout(() => {
+        if (precisaRecarregar("custom", dateFromEl.value)) { recarregarCom("custom", dateFromEl.value, dateToEl.value); return; }
+        render();
+      }, 600);
     }
     dateFromEl.addEventListener("change", aoMudarDatas);
     dateToEl.addEventListener("change", aoMudarDatas);
