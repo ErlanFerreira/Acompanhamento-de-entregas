@@ -143,6 +143,65 @@ Actions (repositório privado tem 2000 minutos grátis/mês — a automação de
 navegador é mais pesada que uma chamada de API simples, mas 4 execuções/dia
 ainda ficam bem dentro do limite gratuito).
 
+## Bot de emissão de CT-e (diária, reentrega, devolução, descarga, complementar, substituição)
+
+Roda no seu PC, pelo terminal (`scripts/emitir_cte.py`, lógica em
+`app/emissao_cte.py`). Você informa o tipo e a chave da NF-e; o bot entra
+no GW, abre "Conhecimentos > Novo cadastro", escolhe o tipo e usa o próprio
+"Localizar conhecimento…" do GW (pesquisa por "Chave Acesso NF-e") para
+achar o CT-e original — o GW copia remetente, destinatário, tomador e notas.
+Se a NF estiver em mais de um CT-e, ele pergunta qual usar.
+
+O frete segue a regra do próprio GW:
+
+| Tipo | Frete |
+|---|---|
+| Reentrega / Devolução | total do CT-e original × "% reentrega"/"% devolução" da tabela de preço do tomador (respeita o frete mínimo) |
+| Substituição | mesmo valor do CT-e original |
+| Diária / Descarga / Complementar | a tabela não tem esse valor — o bot pergunta |
+
+Se o tomador não tiver tabela, ou o % estiver zerado, o bot também pergunta
+o valor. Antes de salvar mostra um resumo e pede confirmação. **Só salva —
+nunca transmite à SEFAZ**; a transmissão continua manual, pelo GW.
+
+```bash
+python scripts/emitir_cte.py reentrega 26261009722463000131550060007711051171417923
+python scripts/emitir_cte.py diaria <chave_nfe> --frete 150,00
+python scripts/emitir_cte.py devolucao <chave_nfe> --simular   # faz tudo menos salvar
+python scripts/emitir_cte.py descarga <chave_nfe> --ver        # mostra o navegador
+```
+
+Usa `PORTAL_EMAIL`/`PORTAL_SENHA` do `.env`. O GW só aceita uma sessão por
+login, então quem estiver logado com o mesmo usuário no navegador cai.
+
+### Pelo painel (tela "Emissão de CT-e", só supervisor)
+
+O mesmo bot, sem terminal, como um assistente de perguntas e respostas
+(`static/emissao.js`): que tipo de CT-e (com explicação de cada um), qual a
+chave da NF-e (conferida enquanto digita), quem está pedindo. O workflow
+`.github/workflows/emissao_cte.yml` roda em etapas
+(`scripts/run_emissao_cte.py`), cada uma levando 1-3 min:
+
+1. **preparar** — faz tudo no GW menos salvar. Se a NF estiver em mais de um
+   CT-e, o assistente pergunta qual é o original e prepara de novo.
+2. O assistente mostra o CT-e achado (remetente/destinatário/quem paga) e
+   pergunta se usa o frete da tabela — ou pede o valor, quando o GW não tem.
+   Depois mostra o resumo e pergunta se pode salvar.
+3. **salvar** — refaz o lançamento com o CT-e e o frete confirmados e salva
+   (sem transmitir). O assistente mostra o número do CT-e gravado.
+
+Mesma NF e mesmo tipo: um pedido em andamento é retomado em vez de abrir
+outro, e um CT-e já salvo só é emitido de novo se a pessoa confirmar. Os
+pedidos ficam no banco separado (`CONSULTAS_DATABASE_URL`), como as consultas.
+
+As emissões rodam uma por vez (`concurrency` do workflow). Configuração:
+
+- Criar no GW um **usuário só para o bot**, com permissão de lançar CT-e
+  (assim ele não derruba a sessão de ninguém nem da sincronização).
+- No GitHub, **Settings → Secrets and variables → Actions**: criar
+  `GW_BOT_EMAIL` e `GW_BOT_SENHA` com esse login.
+- O `GITHUB_DISPATCH_TOKEN` da Vercel já serve (o mesmo das Consultas).
+
 ## Estrutura do projeto
 
 ```
@@ -153,11 +212,15 @@ app/
   models.py       tabelas: cargas, meta
   security.py     sessão via cookie assinado (senha única, sem contas)
   scrape.py       automação de navegador (Playwright): login + gerar relatório
+  emissao_cte.py  lança CT-e derivado (reentrega, devolução...) no GW, sem transmitir
+  tipos_cte.py    tipos de CT-e do bot e validação da chave da NF-e (sem Playwright)
   sync.py         parseia o Excel do relatório e faz upsert no banco
   seed.py         cria as tabelas na primeira subida
 templates/        HTML (Jinja2): base (sidebar), login, painel
 static/           CSS + JS (dashboard.js, theme.js)
 scripts/run_sync.py         rodado pelo GitHub Actions (sincronização periódica)
+scripts/run_emissao_cte.py  rodado pelo GitHub Actions (etapas da tela Emissão de CT-e)
+scripts/emitir_cte.py       roda no seu PC: emite CT-e a partir da chave da NF-e
 .github/workflows/sync.yml  agendamento da sincronização (cron)
 requirements.txt             dependências do app web (Vercel)
 requirements-sync.txt        requirements.txt + openpyxl + playwright (só CI)

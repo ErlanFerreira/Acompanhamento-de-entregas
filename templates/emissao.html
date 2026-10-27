@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Emissão de CT-e — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+  <header class="app-header">
+    <div>
+      <h1>Emissão de CT-e</h1>
+      <p>Responda às perguntas e o bot monta o CT-e no GW para você. Ele só <b>salva</b> — a transmissão à SEFAZ continua sendo feita no GW.</p>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+  </header>
+
+  <section class="cv-card" aria-label="Assistente de emissão de CT-e">
+    <div class="cv-topo">
+      <ol class="cv-passos" id="cv-passos">
+        <li class="cv-passo" data-passo="1"><span class="n">1</span>Tipo</li>
+        <li class="cv-passo" data-passo="2"><span class="n">2</span>Nota fiscal</li>
+        <li class="cv-passo" data-passo="3"><span class="n">3</span>Conferir</li>
+        <li class="cv-passo" data-passo="4"><span class="n">4</span>Salvar</li>
+      </ol>
+      <button type="button" class="btn" id="cv-recomecar">↺ Começar de novo</button>
+    </div>
+    <div class="cv-log" id="cv-log" aria-live="polite"></div>
+  </section>
+
+  <section class="table-section cv-recentes">
+    <div class="table-toolbar">
+      <h2>Pedidos recentes</h2>
+      <span class="count" id="cv-count"></span>
+    </div>
+    <div class="table-scroll">
+      <table class="detail">
+        <thead>
+          <tr>
+            <th>Pedido em</th>
+            <th>Por</th>
+            <th>Tipo</th>
+            <th>NF</th>
+            <th>Situação</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="cv-recentes-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+<script type="application/json" id="cv-tipos">{{ tipos | tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="/static/emissao.js"></script>
+{% endblock %}

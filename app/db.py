@@ -28,7 +28,9 @@ engine = _criar_engine(config.DATABASE_URL)
 #   - consultas de notas (consulta_jobs, consulta_itens);
 #   - login dos analistas (usuarios, tentativas_login) e tratativas de
 #     comprovante -- o analista entra mesmo com o principal fora, e o
-#     histórico das tratativas fica preservado.
+#     histórico das tratativas fica preservado;
+#   - pedidos de emissão de CT-e (emissoes_cte) -- a tela consulta o
+#     andamento a cada poucos segundos.
 # Dados que ficaram num banco anterior: copie com scripts/migrar_banco_antigo.py.
 _url_separado = _url(os.environ.get("CONSULTAS_DATABASE_URL", "").strip())
 engine_separado = _criar_engine(_url_separado) if _url_separado else engine
@@ -36,7 +38,8 @@ engine_consultas = engine_separado  # nome antigo (scripts/run_consulta.py)
 
 TABELAS_CONSULTA = {"consulta_jobs", "consulta_itens"}
 TABELAS_ACESSO = {"usuarios", "tentativas_login", "tratativas_comprovante"}
-TABELAS_SEPARADAS = TABELAS_CONSULTA | TABELAS_ACESSO
+TABELAS_EMISSAO = {"emissoes_cte"}
+TABELAS_SEPARADAS = TABELAS_CONSULTA | TABELAS_ACESSO | TABELAS_EMISSAO
 
 # Primeiro id das tabelas de acesso quando são criadas no banco separado --
 # os registros copiados do principal (ids pequenos) mantêm o id original sem

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db import SessionLocal, engine, engine_consultas  # noqa: E402
 from app.models import ConsultaItem, ConsultaJob  # noqa: E402
-from app.scrape import consultar_notas_fiscais, empresa_confere  # noqa: E402
+from app.scrape import TEXTOS_SEM_RESULTADO, consultar_notas_fiscais, empresa_confere  # noqa: E402
 
 
 def _nomes_esperados(item: ConsultaItem) -> list[str]:
@@ -87,9 +87,24 @@ def main(job_id: int):
                 item.encontrado = False
                 item.erro = "Falha ao consultar no portal"
                 continue
-            matches = _filtrar_por_parceiro(matches, _nomes_esperados(item))
+            nomes = _nomes_esperados(item)
+            todos = matches
+            matches = _filtrar_por_parceiro(todos, nomes)
             if not matches:
                 item.encontrado = False
+                # Diz POR QUE deu "Não" (vai pra coluna Observação da planilha):
+                # o portal não achou a NF, ou achou mas é de outro cliente.
+                if todos:
+                    t = todos[0]
+                    item.observacao = (
+                        f"NF localizada em {len(todos)} CT-e, mas de outro cliente "
+                        f"(ex.: CT-e {t.get('cte')} -- remetente: {t.get('remetente') or '?'} / "
+                        f"destinatário: {t.get('destinatario') or '?'}). "
+                        f"Cliente(s) na planilha: {', '.join(nomes)}"
+                    )[:900]
+                else:
+                    texto = TEXTOS_SEM_RESULTADO.get(item.nf_numero)
+                    item.observacao = "NF não localizada na Consulta Entrega do GW" + (f" | texto do portal: {texto}" if texto else "")
                 continue
 
             primeiro, *extras = matches

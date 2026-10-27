@@ -1,6 +1,6 @@
 import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, LargeBinary, String, Text, UniqueConstraint
 
 from .db import Base
 
@@ -263,3 +263,41 @@ class ConsultaItem(Base):
     dias_atraso = Column(Integer, nullable=True)
     observacao = Column(Text, nullable=True)
     erro = Column(String(255), nullable=True)
+
+
+class EmissaoCte(Base):
+    """Um pedido de emissão de CT-e (diária, reentrega, devolução...) feito
+    na tela "Emissão de CT-e" do painel. Roda em etapas no GitHub Actions
+    (scripts/run_emissao_cte.py), porque o bot precisa de respostas do
+    supervisor no meio do caminho:
+
+    preparando -> [escolher] -> conferir -> salvando -> salvo
+    (qualquer etapa pode ir pra "erro"; escolher/conferir/erro -> "cancelado")
+
+    "preparar" faz tudo no GW menos salvar e grava o resumo; "salvar" refaz
+    o lançamento com o CT-e original e o frete que o supervisor confirmou e
+    clica em Salvar -- nunca transmite à SEFAZ.
+    """
+
+    __tablename__ = "emissoes_cte"
+
+    id = Column(Integer, primary_key=True)
+    criado_em = Column(DateTime, default=datetime.datetime.utcnow)
+    atualizado_em = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    # O supervisor entra com a senha geral (sem nome) -- quem pediu é digitado na tela.
+    solicitante = Column(String(120), nullable=False)
+    tipo = Column(String(20), nullable=False)  # chave de app.tipos_cte.TIPOS
+    chave_nfe = Column(String(44), nullable=False, index=True)
+    status = Column(String(20), default="preparando", index=True)
+    # JSON: CT-e do GW com essa NF quando há mais de um (status "escolher").
+    opcoes = Column(Text, nullable=True)
+    # id interno do GW do CT-e original escolhido (o `retornapai(id)` do popup).
+    cte_original_id = Column(String(20), nullable=True)
+    # JSON: remetente, destinatário, tomador, CT-e original, origem do frete...
+    resumo = Column(Text, nullable=True)
+    frete_calculado = Column(Float, nullable=True)  # None = GW não tem o valor
+    frete_final = Column(Float, nullable=True)  # o confirmado pelo supervisor
+    total_prestacao = Column(Float, nullable=True)
+    numero_ct = Column(String(20), nullable=True)
+    mensagens = Column(Text, nullable=True)  # JSON: alerts/confirms do GW
+    erro_mensagem = Column(String(1000), nullable=True)

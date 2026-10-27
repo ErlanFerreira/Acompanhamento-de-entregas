@@ -1,0 +1,56 @@
+name: Emitir CT-e
+
+on:
+  workflow_dispatch:
+    inputs:
+      emissao_id:
+        description: "ID do emissoes_cte a processar"
+        required: true
+      acao:
+        description: "preparar ou salvar"
+        required: true
+
+# Uma emissão por vez: o login do bot no GW só aceita uma sessão, e duas
+# emissões juntas brigariam pelo mesmo número de CT-e. As seguintes esperam
+# na fila (não são canceladas).
+concurrency:
+  group: emissao-cte
+  cancel-in-progress: false
+
+jobs:
+  emitir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements-sync.txt
+
+      # O download do Chromium varia muito de duração (de 30 s a 6 min); guardar
+      # o navegador em cache evita baixá-lo a cada execução.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements-sync.txt') }}
+
+      - run: python -m playwright install --with-deps chromium
+
+      - run: python scripts/run_emissao_cte.py "${{ inputs.emissao_id }}" "${{ inputs.acao }}"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONSULTAS_DATABASE_URL: ${{ secrets.CONSULTAS_DATABASE_URL }}  # banco separado: os pedidos de emissão ficam lá
+          # Usuário do GW próprio do bot (não o PORTAL_EMAIL da sincronização),
+          # pra não derrubar a sessão de ninguém.
+          PORTAL_EMAIL: ${{ secrets.GW_BOT_EMAIL }}
+          PORTAL_SENHA: ${{ secrets.GW_BOT_SENHA }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debug-emissao-${{ inputs.emissao_id }}-${{ inputs.acao }}
+          path: "*_falha.*"
+          if-no-files-found: ignore

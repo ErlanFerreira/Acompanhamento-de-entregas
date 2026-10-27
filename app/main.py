@@ -21,12 +21,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from . import chave_cte, config, relatorios_bipagem
+from . import chave_cte, config, relatorios_bipagem, tipos_cte
 from . import bloqueio_login, escopo, historico
 from .logistica import classificar as classificar_logistica
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
-from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, Meta, ProtocoloFatura, TratativaComprovante, Usuario
+from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, EmissaoCte, Meta, ProtocoloFatura, TratativaComprovante, Usuario
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
@@ -619,6 +619,178 @@ def api_sync_run():
     return {"ok": True, "queued": True}
 
 
+# ------------------------------------------------------- emissão CT-e -----
+#
+# O bot (app/emissao_cte.py) roda no GitHub Actions em etapas -- ver o
+# docstring de EmissaoCte. A tela só cria o pedido, mostra o que o bot achou
+# e repassa as decisões do supervisor (qual CT-e, valor do frete, salvar).
+
+# Pedido "preparando"/"salvando" parado há mais que isso = o workflow morreu
+# sem avisar (ou o GitHub não alocou máquina). Folga para a fila: as
+# emissões rodam uma por vez (concurrency do emissao_cte.yml).
+_MINUTOS_MAX_EMISSAO = 30
+
+
+def _expirar_emissoes_paradas(db: Session) -> None:
+    limite = datetime.datetime.utcnow() - datetime.timedelta(minutes=_MINUTOS_MAX_EMISSAO)
+    paradas = (
+        db.query(EmissaoCte)
+        .filter(EmissaoCte.status.in_(("preparando", "salvando")), EmissaoCte.atualizado_em < limite)
+        .all()
+    )
+    for em in paradas:
+        if em.status == "salvando":
+            em.erro_mensagem = (
+                f"O salvamento não respondeu em {_MINUTOS_MAX_EMISSAO} minutos. CONFIRA na tela de "
+                "Conhecimentos do GW se o CT-e foi gravado antes de pedir de novo."
+            )
+        else:
+            em.erro_mensagem = f"O bot não respondeu em {_MINUTOS_MAX_EMISSAO} minutos. Faça um novo pedido."
+        em.status = "erro"
+    if paradas:
+        db.commit()
+
+
+def _emissao_to_dict(em: EmissaoCte) -> dict:
+    return {
+        "id": em.id,
+        "criado_em": em.criado_em.isoformat() + "Z" if em.criado_em else None,
+        "solicitante": em.solicitante,
+        "tipo": em.tipo,
+        "tipo_rotulo": tipos_cte.TIPOS.get(em.tipo, ("", em.tipo))[1],
+        "chave_nfe": em.chave_nfe,
+        "status": em.status,
+        "opcoes": json.loads(em.opcoes) if em.opcoes else [],
+        "resumo": json.loads(em.resumo) if em.resumo else None,
+        "frete_calculado": em.frete_calculado,
+        "frete_final": em.frete_final,
+        "total_prestacao": em.total_prestacao,
+        "numero_ct": em.numero_ct,
+        "mensagens": json.loads(em.mensagens) if em.mensagens else [],
+        "erro_mensagem": em.erro_mensagem,
+    }
+
+
+def _disparar_emissao(db: Session, em: EmissaoCte, acao: str):
+    """Dispara a etapa no GitHub Actions; se não conseguir, o pedido vira
+    "erro" na hora (senão ficaria esperando um bot que nunca vai rodar)."""
+    resultado = _dispatch_workflow("emissao_cte.yml", {"emissao_id": str(em.id), "acao": acao})
+    if not resultado["ok"]:
+        em.status = "erro"
+        em.erro_mensagem = f"Não consegui acionar o bot: {resultado['erro']}"[:990]
+        db.commit()
+        return JSONResponse({"erro": em.erro_mensagem}, status_code=502)
+    return _emissao_to_dict(em)
+
+
+@app.get("/emissao", response_class=HTMLResponse, dependencies=[Depends(require_supervisor_page)])
+def emissao_page(request: Request):
+    tipos = [
+        {"valor": k, "rotulo": v[1], "icone": tipos_cte.EXPLICACOES[k][0], "explicacao": tipos_cte.EXPLICACOES[k][1]}
+        for k, v in tipos_cte.TIPOS.items()
+    ]
+    return templates.TemplateResponse("emissao.html", {"request": request, "active": "emissao", "tipos": tipos})
+
+
+@app.get("/api/emissoes", dependencies=[Depends(require_supervisor_api)])
+def api_emissoes_list(db: Session = Depends(get_db)):
+    _expirar_emissoes_paradas(db)
+    rows = db.query(EmissaoCte).order_by(EmissaoCte.criado_em.desc()).limit(30).all()
+    return {"emissoes": [_emissao_to_dict(em) for em in rows]}
+
+
+@app.get("/api/emissoes/{emissao_id}", dependencies=[Depends(require_supervisor_api)])
+def api_emissoes_status(emissao_id: int, db: Session = Depends(get_db)):
+    _expirar_emissoes_paradas(db)
+    em = db.query(EmissaoCte).filter(EmissaoCte.id == emissao_id).first()
+    if not em:
+        return JSONResponse({"erro": "Pedido não encontrado."}, status_code=404)
+    return _emissao_to_dict(em)
+
+
+_STATUS_EM_ANDAMENTO = ("preparando", "escolher", "conferir", "salvando")
+
+
+@app.post("/api/emissoes", dependencies=[Depends(require_supervisor_api)])
+def api_emissoes_criar(payload: dict, db: Session = Depends(get_db)):
+    tipo = str(payload.get("tipo") or "").strip()
+    solicitante = str(payload.get("solicitante") or "").strip()[:120]
+    if tipo not in tipos_cte.TIPOS:
+        return JSONResponse({"erro": "Escolha o tipo de CT-e."}, status_code=400)
+    if not solicitante:
+        return JSONResponse({"erro": "Informe quem está pedindo a emissão."}, status_code=400)
+    try:
+        chave = tipos_cte.validar_chave_nfe(str(payload.get("chave") or ""))
+    except tipos_cte.EmissaoError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+
+    # Mesma NF e mesmo tipo: um pedido em andamento é retomado (não abre
+    # outro), e um CT-e já salvo só é emitido de novo se a pessoa confirmar
+    # -- evita CT-e em dobro quando duas pessoas atendem o mesmo caso.
+    _expirar_emissoes_paradas(db)
+    anteriores = db.query(EmissaoCte).filter(EmissaoCte.chave_nfe == chave, EmissaoCte.tipo == tipo)
+    andamento = anteriores.filter(EmissaoCte.status.in_(_STATUS_EM_ANDAMENTO)).first()
+    if andamento:
+        return JSONResponse({"em_andamento": _emissao_to_dict(andamento)}, status_code=409)
+    salvo = anteriores.filter(EmissaoCte.status == "salvo").order_by(EmissaoCte.criado_em.desc()).first()
+    if salvo and not payload.get("confirmar_repetido"):
+        return JSONResponse({"ja_salvo": _emissao_to_dict(salvo)}, status_code=409)
+
+    em = EmissaoCte(tipo=tipo, chave_nfe=chave, solicitante=solicitante, status="preparando")
+    db.add(em)
+    db.commit()
+    return _disparar_emissao(db, em, "preparar")
+
+
+def _mudar_status(db: Session, emissao_id: int, de: tuple[str, ...], valores: dict) -> EmissaoCte | None:
+    """Troca o status só se ainda estiver num dos esperados -- num UPDATE
+    só, pra dois cliques (ou duas pessoas) não dispararem a mesma etapa
+    duas vezes (ex: salvar o mesmo CT-e em dobro)."""
+    alterados = (
+        db.query(EmissaoCte)
+        .filter(EmissaoCte.id == emissao_id, EmissaoCte.status.in_(de))
+        .update({**valores, "atualizado_em": datetime.datetime.utcnow()}, synchronize_session=False)
+    )
+    db.commit()
+    return db.query(EmissaoCte).filter(EmissaoCte.id == emissao_id).first() if alterados else None
+
+
+@app.post("/api/emissoes/{emissao_id}/escolher", dependencies=[Depends(require_supervisor_api)])
+def api_emissoes_escolher(emissao_id: int, payload: dict, db: Session = Depends(get_db)):
+    cte_id = str(payload.get("cte_id") or "").strip()
+    em = db.query(EmissaoCte).filter(EmissaoCte.id == emissao_id).first()
+    if not em:
+        return JSONResponse({"erro": "Pedido não encontrado."}, status_code=404)
+    if cte_id not in {str(o.get("id")) for o in json.loads(em.opcoes or "[]")}:
+        return JSONResponse({"erro": "Escolha um dos CT-e da lista."}, status_code=400)
+    em = _mudar_status(db, emissao_id, ("escolher",), {"status": "preparando", "cte_original_id": cte_id})
+    if not em:
+        return JSONResponse({"erro": "Esse pedido não está mais aguardando escolha."}, status_code=409)
+    return _disparar_emissao(db, em, "preparar")
+
+
+@app.post("/api/emissoes/{emissao_id}/salvar", dependencies=[Depends(require_supervisor_api)])
+def api_emissoes_salvar(emissao_id: int, payload: dict, db: Session = Depends(get_db)):
+    try:
+        frete = round(float(str(payload.get("frete") or "").replace(",", ".")), 2)
+    except ValueError:
+        frete = 0
+    if frete <= 0:
+        return JSONResponse({"erro": "Informe o valor do frete."}, status_code=400)
+    em = _mudar_status(db, emissao_id, ("conferir",), {"status": "salvando", "frete_final": frete})
+    if not em:
+        return JSONResponse({"erro": "Esse pedido não está mais aguardando conferência."}, status_code=409)
+    return _disparar_emissao(db, em, "salvar")
+
+
+@app.post("/api/emissoes/{emissao_id}/cancelar", dependencies=[Depends(require_supervisor_api)])
+def api_emissoes_cancelar(emissao_id: int, db: Session = Depends(get_db)):
+    em = _mudar_status(db, emissao_id, ("escolher", "conferir", "erro"), {"status": "cancelado"})
+    if not em:
+        return JSONResponse({"erro": "Esse pedido não pode mais ser cancelado."}, status_code=409)
+    return _emissao_to_dict(em)
+
+
 # ------------------------------------------------------------ bipagem -----
 
 @app.get("/bipagem", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
@@ -1151,7 +1323,7 @@ async def api_consultas_create(
     return {"ok": True, "job_id": job.id, "total_itens": total}
 
 
-_COLUNAS_NOVAS = ["CT-e", "Status Entrega", "Previsão Entrega", "Data Entrega", "Encontrado?"]
+_COLUNAS_NOVAS = ["CT-e", "Status Entrega", "Previsão Entrega", "Data Entrega", "Encontrado?", "Observação"]
 # Azul, Ênfase 1, mais claro 60% -- cor padrão do tema do Excel/Office.
 _FILL_DADOS_GW = PatternFill(fill_type="solid", start_color="FFB4C7E7", end_color="FFB4C7E7")
 
@@ -1234,7 +1406,8 @@ def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
 
         def _escrever_resultado(linha_planilha: int, item: ConsultaItem, ws=ws, max_col_original=max_col_original):
             valores = [item.cte, item.status_entrega, item.previsao_entrega, item.data_entrega,
-                       "Sim" if item.encontrado else ("Falha na consulta" if item.erro else "Não")]
+                       "Sim" if item.encontrado else ("Falha na consulta" if item.erro else "Não"),
+                       item.observacao]
             for offset, valor in enumerate(valores, start=1):
                 celula = ws.cell(row=linha_planilha, column=max_col_original + offset, value=valor)
                 celula.fill = _FILL_DADOS_GW

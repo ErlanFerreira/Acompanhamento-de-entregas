@@ -380,10 +380,19 @@ def _extrair_nomes_por_cte(html: str) -> dict[str, dict]:
     return nomes
 
 
+# Texto da tela de resultado das NFs em que não apareceu CT-e nenhum, pra
+# explicar o "Não" na planilha (o portal disse "nenhum registro"? mostrou um
+# tipo de documento que não sabemos ler?). Preenchido por consultar_notas_fiscais.
+TEXTOS_SEM_RESULTADO: dict[str, str] = {}
+_ULTIMO_TEXTO = ""
+
+
 def _ler_resultado(page: Page) -> list[dict]:
     """Lê o resultado da consulta de NF que está na tela (CT-e achados, com
     remetente/destinatário de cada um)."""
+    global _ULTIMO_TEXTO
     texto = page.eval_on_selector("#formBx", "el => el.innerText")
+    _ULTIMO_TEXTO = texto
     resultado = _parse_resultado(texto)
     nomes_por_cte = _extrair_nomes_por_cte(page.content())
     for r in resultado:
@@ -469,6 +478,8 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
                         # antes de concluir "não encontrada"
                         page.wait_for_timeout(3000)
                         resultado = _ler_resultado(page)
+                    if not resultado:
+                        TEXTOS_SEM_RESULTADO[numero] = " ".join(_ULTIMO_TEXTO.split())[:600]
                     resultados[numero] = resultado
                 except Exception as exc:
                     falhas += 1
