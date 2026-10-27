@@ -28,11 +28,31 @@ def _nomes_esperados(item: ConsultaItem) -> list[str]:
         return []
 
 
-def _pontos(m: dict, nomes_esperados: list[str]) -> int:
-    """Quantas partes do CT-e (consignatário/tomador, remetente, destinatário)
-    batem com algum dos nomes que a planilha informou."""
+# Quantos nomes da planilha precisam bater com partes do CT-e pra confirmar que
+# é a nota procurada (o número da NF sozinho não basta: não é único).
+MINIMO_CONFIRMACOES = 2
+
+
+def _nomes_distintos(nomes: list[str]) -> list[str]:
+    """Tira repetidos (a mesma empresa em duas colunas da planilha, ou só com
+    LTDA/S/A de diferença) -- senão um nome só contaria como dois."""
+    saida: list[str] = []
+    for n in nomes:
+        if n and not any(nomes_conferem(n, o) for o in saida):
+            saida.append(n)
+    return saida
+
+
+def _exigido(nomes_distintos: list[str]) -> int:
+    # Planilha com só um nome (ex: uma coluna "Cliente") não tem como dar dois.
+    return min(MINIMO_CONFIRMACOES, len(nomes_distintos))
+
+
+def _pontos(m: dict, nomes_distintos: list[str]) -> int:
+    """Quantos nomes da planilha batem com alguma parte do CT-e
+    (consignatário/tomador, remetente ou destinatário)."""
     partes = [m.get("consignatario"), m.get("remetente"), m.get("destinatario")]
-    return sum(1 for p in partes if p and any(nomes_conferem(n, p) for n in nomes_esperados))
+    return sum(1 for n in nomes_distintos if any(p and nomes_conferem(n, p) for p in partes))
 
 
 def _filtrar_por_parceiro(matches: list[dict], nomes_esperados: list[str]) -> list[dict]:
@@ -40,17 +60,20 @@ def _filtrar_por_parceiro(matches: list[dict], nomes_esperados: list[str]) -> li
     da NF sozinho não é único, então sem essa checagem podíamos anexar
     informação de outro cliente.
 
-    Basta UMA das partes (consignatário/tomador, remetente ou destinatário)
-    bater com algum dos nomes da planilha (consignatário, tomador, remetente,
-    destinatário ou cliente); com vários CT-e para a mesma NF, ficam só os que
-    batem em mais partes. Nomes são comparados de forma tolerante (LTDA, S/A,
-    acento, nome parcial)."""
+    Pelo menos DOIS nomes diferentes da planilha (consignatário, tomador,
+    remetente, destinatário ou cliente) precisam bater com partes do CT-e
+    (consignatário/tomador, remetente, destinatário) -- ou todos, se a
+    planilha só tem um nome. Com vários CT-e para a mesma NF, ficam só os que
+    batem mais. Nomes são comparados de forma tolerante (LTDA, S/A, acento,
+    nome parcial)."""
     if not nomes_esperados:
         return matches  # planilha não tem colunas pra validar -- mantém como antes
+    nomes = _nomes_distintos(nomes_esperados)
+    exigido = _exigido(nomes)
     sem_nome = [m for m in matches if not (m.get("consignatario") or m.get("remetente") or m.get("destinatario"))]
-    pontuados = [(m, _pontos(m, nomes_esperados)) for m in matches if m not in sem_nome]
+    pontuados = [(m, _pontos(m, nomes)) for m in matches if m not in sem_nome]
     melhor = max([p for _, p in pontuados] or [0])
-    validos = [m for m, p in pontuados if p >= 1 and p == melhor]
+    validos = [m for m, p in pontuados if p >= max(exigido, 1) and p == melhor]
     # CT-e sem nome extraível (ex: tipo != "Normal") não dá pra invalidar: mantém.
     return validos + sem_nome
 
@@ -105,8 +128,10 @@ def main(job_id: int):
                 # o portal não achou a NF, ou achou mas é de outro cliente.
                 if todos:
                     t = todos[0]
+                    distintos = _nomes_distintos(nomes)
                     item.observacao = (
-                        f"NF localizada em {len(todos)} CT-e, mas de outro cliente "
+                        f"NF localizada em {len(todos)} CT-e, mas só {_pontos(t, distintos)} de {len(distintos)} nome(s) "
+                        f"da planilha batem (mínimo {_exigido(distintos)}) "
                         f"(ex.: CT-e {t.get('cte')} -- consignatário: {t.get('consignatario') or '?'} / "
                         f"remetente: {t.get('remetente') or '?'} / destinatário: {t.get('destinatario') or '?'}). "
                         f"Cliente(s) na planilha: {', '.join(nomes)}"
