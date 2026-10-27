@@ -15,6 +15,9 @@ def _criar_engine(url: str):
     return create_engine(url, connect_args=args, pool_pre_ping=True)
 
 
+# Banco principal (DATABASE_URL). Trocado por um projeto Neon novo em
+# 27/10/2026, quando o anterior estourou a cota mensal de rede -- os dados que
+# ficaram no anterior são copiados com scripts/migrar_banco_antigo.py.
 engine = _criar_engine(config.DATABASE_URL)
 
 # Banco separado (CONSULTAS_DATABASE_URL, opcional -- o nome ficou de quando
