@@ -282,6 +282,15 @@
     function emRota(r) { return r.logistica === "rota"; }
     function emDeposito(r) { return r.logistica === "deposito"; }
 
+    // Aviso "Em rota" ao lado do status: saiu pra entrega (manifesto/romaneio da
+    // matriz) e ainda não tem data de entrega.
+    function pillRota(r) {
+      if (!emRota(r) || r.data_baixa) return "";
+      return ' <span class="status-pill" title="Com manifesto/romaneio emitido pela matriz, ainda sem data de entrega" ' +
+        'style="background:color-mix(in srgb, var(--series-1) 16%, transparent); color:var(--series-1);">' +
+        '<span class="d" style="background:var(--series-1)"></span>Em rota</span>';
+    }
+
     // ---- tela "#lista/<grupo>": CT-e do card clicado, agrupados por
     // tomador/consignatário (clientes recolhidos, CT-e e NF ao expandir). Respeita os
     // filtros do topo; o botão Voltar (ou o voltar do navegador) retorna ao
@@ -432,7 +441,7 @@
               '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario || "", 30)) + '</td>' +
               '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
               '<td>' + fmtDate(r.data_baixa) + '</td>' +
-              '<td><span class="status-pill" style="background:color-mix(in srgb, ' + STATUS_COLOR[r.estado] + ' 16%, transparent); color:' + STATUS_COLOR[r.estado] + ';"><span class="d" style="background:' + STATUS_COLOR[r.estado] + '"></span>' + esc(STATUS_SHORT[r.estado]) + '</span></td>' +
+              '<td><span class="status-pill" style="background:color-mix(in srgb, ' + STATUS_COLOR[r.estado] + ' 16%, transparent); color:' + STATUS_COLOR[r.estado] + ';"><span class="d" style="background:' + STATUS_COLOR[r.estado] + '"></span>' + esc(STATUS_SHORT[r.estado]) + '</span>' + pillRota(r) + '</td>' +
               '<td class="num">' + diasStr + '</td>' +
               '<td title="' + esc(r.ocorrencia || "") + '">' + esc(truncate(r.ocorrencia || "—", 30)) + '</td>' +
               '<td class="' + (r.manifesto ? "flag-yes" : "flag-no") + '">' + (r.manifesto ? "Sim" : "Não") + '</td>' +
@@ -760,7 +769,7 @@
             '<td title="' + esc(r.consignatario) + '">' + esc(truncate(r.consignatario || "", 26)) + '</td>' +
             '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 26)) + '</td>' +
             '<td>' + esc(r.cidade_dest) + '/' + esc(r.uf_dest) + '</td>' +
-            '<td><span class="status-pill" style="background:color-mix(in srgb, ' + STATUS_COLOR[r.estado] + ' 16%, transparent); color:' + STATUS_COLOR[r.estado] + ';"><span class="d" style="background:' + STATUS_COLOR[r.estado] + '"></span>' + esc(STATUS_SHORT[r.estado]) + '</span></td>' +
+            '<td><span class="status-pill" style="background:color-mix(in srgb, ' + STATUS_COLOR[r.estado] + ' 16%, transparent); color:' + STATUS_COLOR[r.estado] + ';"><span class="d" style="background:' + STATUS_COLOR[r.estado] + '"></span>' + esc(STATUS_SHORT[r.estado]) + '</span>' + pillRota(r) + '</td>' +
             '<td class="num">' + diasStr + '</td>' +
             '<td title="' + esc(r.ocorrencia || "") + '">' + esc(truncate(r.ocorrencia || "—", 30)) + '</td>' +
             '<td class="' + (r.manifesto ? "flag-yes" : "flag-no") + '">' + (r.manifesto ? "Sim" : "Não") + '</td>' +
