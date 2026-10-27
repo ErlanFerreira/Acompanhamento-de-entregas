@@ -37,6 +37,25 @@ def _fmt_data(d: datetime.date) -> str:
     return d.strftime("%d/%m/%Y")
 
 
+def _abrir(page: Page, url: str, espera_ms: int = 60_000) -> None:
+    """goto tolerante: o portal às vezes demora ou nunca "assenta" (scripts de
+    terceiros seguem fazendo requisições) e o `networkidle` estourava os 30 s
+    padrão, derrubando a consulta inteira. Se estourar, segue com o que já
+    carregou -- quem vem depois espera o que precisa (campo de login, menu)
+    com timeout próprio."""
+    try:
+        page.goto(url, wait_until="networkidle", timeout=espera_ms)
+    except PlaywrightTimeoutError:
+        logger.warning("Portal não ficou ocioso em %ds em %s -- seguindo mesmo assim.", espera_ms // 1000, url)
+
+
+def _aguardar_ocioso(page: Page, espera_ms: int = 30_000) -> None:
+    try:
+        page.wait_for_load_state("networkidle", timeout=espera_ms)
+    except PlaywrightTimeoutError:
+        pass
+
+
 def _logout(page: Page) -> None:
     """Desconecta explicitamente a sessão antes de fechar o navegador.
 
@@ -48,7 +67,7 @@ def _logout(page: Page) -> None:
     essa barra lateral, então navega de volta pro menu antes.
     """
     try:
-        page.goto(f"{PORTAL_URL}/menu", wait_until="networkidle")
+        _abrir(page, f"{PORTAL_URL}/menu")
         try:
             page.click("text=Pular tour", timeout=2000)
         except PlaywrightTimeoutError:
@@ -185,7 +204,16 @@ def _login(page: Page) -> None:
             pass
 
     page.on("response", _anotar_post)
-    page.goto(f"{PORTAL_URL}/menu", wait_until="networkidle")
+    for tentativa in range(2):
+        _abrir(page, f"{PORTAL_URL}/menu")
+        if not page.url.startswith("about:"):
+            break
+        page.wait_for_timeout(5000)  # a página nem carregou: uma segunda tentativa
+    if page.url.startswith("about:"):
+        raise ScrapeError(
+            "O portal GW Sistemas não respondeu (a página não carregou em 2 tentativas) -- "
+            "provavelmente fora do ar ou muito lento; tente de novo em alguns minutos."
+        )
 
     # O login às vezes falha silenciosamente na primeira tentativa (parece
     # uma condição de corrida com scripts de terceiros da página) -- tenta
@@ -204,7 +232,7 @@ def _login(page: Page) -> None:
             # A SPA às vezes passa pela tela de login e redireciona sozinha
             # pro menu/home enquanto a gente espera o campo -- reavalia a URL
             # em vez de estourar o timeout de 30s.
-            page.wait_for_load_state("networkidle")
+            _aguardar_ocioso(page)
             continue
         page.locator(_SEL_SENHA).first.fill(senha, timeout=10_000)
         page.locator(_SEL_ENTRAR).first.click(timeout=10_000)
@@ -213,7 +241,7 @@ def _login(page: Page) -> None:
         if novas:
             avisos.append(" / ".join(novas)[:200])
         page.wait_for_timeout(2000)
-        page.wait_for_load_state("networkidle")
+        _aguardar_ocioso(page)
 
     if "/login" in page.url:
         _salvar_debug(page, "login")
@@ -228,14 +256,14 @@ def _login(page: Page) -> None:
     # Após o login, a SPA ainda redireciona/inicializa a sessão por um
     # instante -- navegar cedo demais para outra URL derruba a sessão com
     # erro 500.
-    page.wait_for_load_state("networkidle")
+    _aguardar_ocioso(page)
     page.wait_for_timeout(2000)
 
     # Cuidado: com senha ERRADA o portal ainda redireciona pra fora de
     # "/login" (ex: pra "/home"), então a checagem de URL acima sozinha não
     # é suficiente -- confirma autenticação real indo pro menu e checando um
     # elemento que só existe logado (o "Sair" do menu principal).
-    page.goto(f"{PORTAL_URL}/menu", wait_until="networkidle")
+    _abrir(page, f"{PORTAL_URL}/menu")
     try:
         page.wait_for_selector(".logout-item", timeout=10_000)
     except PlaywrightTimeoutError:
