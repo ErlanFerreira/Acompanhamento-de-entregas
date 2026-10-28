@@ -51,6 +51,7 @@ from .security import (
     require_supervisor_page,
     tem_acesso_completo,
     pode_emitir_cte,
+    pode_ver_sac,
     usuario_logado,
     verify_share_token,
 )
@@ -93,6 +94,7 @@ templates = Jinja2Templates(directory="templates")
 templates.env.globals["tem_acesso_completo"] = tem_acesso_completo
 templates.env.globals["eh_supervisor"] = eh_supervisor
 templates.env.globals["usuario_logado"] = usuario_logado
+templates.env.globals["pode_ver_sac"] = pode_ver_sac
 templates.env.globals["pode_emitir_cte"] = pode_emitir_cte
 
 
