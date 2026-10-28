@@ -403,6 +403,7 @@
       ["Trajeto", esc(r.remetente) + " → " + esc(r.destinatario)],
       ["Quem paga", esc(r.tomador)],
       ["Frete", "<b>" + moeda(frete) + "</b>"],
+      ["Observação", esc(r.observacao)],
     ]) + '<p class="cv-p">Posso salvar no GW? Ele fica salvo <b>sem transmitir</b> — a transmissão continua sendo feita por você no GW.</p>');
     opcoes(m.area, [
       {

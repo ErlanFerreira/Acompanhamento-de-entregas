@@ -49,6 +49,7 @@ def _resumo(r) -> dict:
         "destinatario": r.destinatario,
         "tomador": r.tomador,
         "origem_frete": r.origem_frete,
+        "observacao": r.observacao,
     }
 
 
@@ -61,6 +62,7 @@ def preparar(db, em: EmissaoCte) -> None:
             perguntar=lambda msg: False,
             confirmar=lambda r: False,
             cte_id=em.cte_original_id,
+            solicitante=em.solicitante,
             simular=True,
         )
     except _VariosCtes as e:
@@ -97,6 +99,7 @@ def salvar(db, em: EmissaoCte) -> None:
         confirmar=confirmar,
         frete_manual=em.frete_final,
         cte_id=em.cte_original_id,
+        solicitante=em.solicitante,
     )
     em.mensagens = json.dumps(r.mensagens, ensure_ascii=False)
     em.total_prestacao = r.total_prestacao

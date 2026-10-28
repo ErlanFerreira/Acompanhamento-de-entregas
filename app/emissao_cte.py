@@ -75,6 +75,7 @@ class Resultado:
     frete: float
     total_prestacao: float
     origem_frete: str
+    observacao: str = ""
     frete_pendente: bool = False
     salvo: bool = False
     mensagens: list[str] = field(default_factory=list)
@@ -196,8 +197,27 @@ def _ler_formulario(frame: Frame) -> dict:
                 numero_ct: v('nfiscal'), remetente: v('rem_rzs'), destinatario: v('dest_rzs'),
                 tomador: v('con_rzs'), valor_frete: v('valor_frete'), total: v('total'),
                 id_original: v('id_dev_reen'), id_conhecimento: v('idConhecimento'),
+                observacao: [1, 2, 3, 4, 5].map(i => v('obs_lin' + i)).filter(Boolean).join(' | '),
             };
         }"""
+    )
+
+
+def _anotar_solicitante(frame: Frame, solicitante: str) -> None:
+    """Grava quem pediu na primeira linha livre da observação do CT-e (a
+    primeira o GW já usa: "Reentrega do CTRC: ..."). O robô entra no GW com
+    um usuário só dele, então é assim que dá pra saber, olhando o CT-e no
+    GW, quem pediu a emissão. Sai também no DACTE."""
+    frame.evaluate(
+        """(texto) => {
+            for (let i = 2; i <= 5; i++) {
+                const campo = document.getElementById('obs_lin' + i);
+                if (campo && !campo.value.trim()) { campo.value = texto; return; }
+            }
+            const ultima = document.getElementById('obs_lin5');
+            if (ultima) ultima.value = (ultima.value + ' | ' + texto).slice(0, 399);
+        }""",
+        f"Solicitado por: {solicitante} (painel)"[:399],
     )
 
 
@@ -282,6 +302,7 @@ def emitir(
     confirmar: Callable[[Resultado], bool],
     frete_manual: Optional[float] = None,
     cte_id: Optional[str] = None,
+    solicitante: Optional[str] = None,
     simular: bool = False,
     headless: bool = True,
 ) -> Resultado:
@@ -298,6 +319,7 @@ def emitir(
     - frete_manual: usa esse valor no lugar do que o GW calcular.
     - cte_id: id (do GW) do CT-e original já escolhido antes -- pula o
       escolher_cte.
+    - solicitante: nome de quem pediu -- vai na observação do CT-e.
     """
     if tipo not in TIPOS:
         raise EmissaoError(f"Tipo de CT-e '{tipo}' não suportado. Use um destes: {', '.join(TIPOS)}.")
@@ -369,6 +391,8 @@ def emitir(
                         frete_pendente = True
                     else:
                         origem = f"informado pelo usuário ({origem})"
+            if solicitante:
+                _anotar_solicitante(frame, solicitante)
             if frete is not None and abs(frete - valor_gw) >= 0.005:
                 _aplicar_frete(frame, frete)
             dados = _ler_formulario(frame)
@@ -383,6 +407,7 @@ def emitir(
                 frete=0.0 if frete_pendente else _num(dados["valor_frete"]),
                 total_prestacao=0.0 if frete_pendente else _num(dados["total"]),
                 origem_frete=origem,
+                observacao=dados["observacao"],
                 frete_pendente=frete_pendente,
                 mensagens=dialogos.mensagens,
             )

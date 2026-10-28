@@ -85,7 +85,8 @@ def _resumo(r: Resultado) -> str:
         f"  Destinatário:    {r.destinatario}\n"
         f"  Tomador:         {r.tomador}\n"
         f"  Frete:           {_moeda(r.frete)} -- {r.origem_frete}\n"
-        f"  Total prestação: {_moeda(r.total_prestacao)}"
+        f"  Total prestação: {_moeda(r.total_prestacao)}\n"
+        f"  Observação:      {r.observacao}"
     )
 
 
@@ -101,6 +102,7 @@ def main() -> int:
     parser.add_argument("--frete", type=_valor, help="valor do frete (ex: 150,00)")
     parser.add_argument("--simular", action="store_true", help="não salva, só mostra o que sairia")
     parser.add_argument("--ver", action="store_true", help="mostra o navegador")
+    parser.add_argument("--solicitante", help="nome de quem pediu (vai na observação do CT-e)")
     args = parser.parse_args()
 
     print("Entrando no GW e buscando o CT-e da NF...")
@@ -109,7 +111,7 @@ def main() -> int:
             args.tipo, args.chave,
             escolher_cte=escolher_cte, informar_frete=informar_frete,
             perguntar=perguntar, confirmar=confirmar,
-            frete_manual=args.frete, simular=args.simular, headless=not args.ver,
+            frete_manual=args.frete, solicitante=args.solicitante, simular=args.simular, headless=not args.ver,
         )
     except EmissaoError as e:
         print(f"\nERRO: {e}")

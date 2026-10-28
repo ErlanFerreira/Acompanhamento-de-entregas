@@ -198,6 +198,10 @@ Quem pode usar: o supervisor e os analistas marcados em **Usuários →
 "Pode emitir CT-e"**. O pedido do analista sai no nome dele (a tela não
 pergunta) e ele vê só os pedidos dele em "Pedidos recentes".
 
+O robô entra no GW com um usuário só dele; para saber no GW quem pediu, o
+nome vai na observação do CT-e ("Solicitado por: Maria Silva (painel)", na
+primeira linha livre depois da que o GW preenche) — sai também no DACTE.
+
 As emissões rodam uma por vez (`concurrency` do workflow). Configuração:
 
 - Criar no GW um **usuário só para o bot**, com permissão de lançar CT-e
