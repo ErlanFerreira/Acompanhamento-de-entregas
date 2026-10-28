@@ -138,6 +138,8 @@ class Usuario(Base):
     email = Column(String(255), nullable=True)
     # Vê no menu o atalho do portal do SAC (o supervisor sempre vê).
     acesso_sac = Column(Boolean, default=False, nullable=False)
+    # Pode usar a tela "Emissão de CT-e" (o supervisor sempre pode).
+    emite_cte = Column(Boolean, default=False, nullable=False)
     # Senha definida pelo supervisor (cadastro ou redefinição) -- no próximo
     # login o analista tem de trocar antes de usar o sistema.
     trocar_senha = Column(Boolean, default=True, nullable=False)

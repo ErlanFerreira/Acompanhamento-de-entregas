@@ -36,6 +36,7 @@ _COLUNAS_ADICIONADAS = {
         "trocar_senha": "BOOLEAN DEFAULT TRUE",
         "email": "VARCHAR(255)",
         "acesso_sac": "BOOLEAN DEFAULT FALSE",
+        "emite_cte": "BOOLEAN DEFAULT FALSE",
     },
 }
 

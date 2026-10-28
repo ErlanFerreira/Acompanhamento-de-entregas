@@ -8,6 +8,8 @@
 
   const TIPOS = JSON.parse(document.getElementById("cv-tipos").textContent);
   const TIPO = Object.fromEntries(TIPOS.map(t => [t.valor, t]));
+  // Analista entra com login próprio: o pedido já sai no nome dele.
+  const SOLICITANTE_FIXO = JSON.parse(document.getElementById("cv-solicitante").textContent);
   const log = document.getElementById("cv-log");
   const recentesBody = document.getElementById("cv-recentes-body");
 
@@ -213,6 +215,11 @@
   }
 
   function perguntarNome() {
+    if (SOLICITANTE_FIXO) {
+      estado.solicitante = SOLICITANTE_FIXO;
+      criarPedido(false);
+      return;
+    }
     const m = bot("E quem está pedindo esta emissão? (fica registrado no pedido)");
     m.area.innerHTML =
       '<form class="cv-entrada" autocomplete="off">' +
@@ -440,11 +447,11 @@
     guardar(CHAVE_ATUAL, null);
     const m = bot("😕 Não consegui concluir: " + msgErro(em.erro_mensagem || "erro sem detalhe"));
     const lista = [];
-    if (estado.solicitante || ler(CHAVE_NOME)) {
+    if (SOLICITANTE_FIXO || estado.solicitante || ler(CHAVE_NOME)) {
       lista.push({
         rotulo: "Tentar de novo", classe: "btn-primary",
         acao: () => {
-          estado.solicitante = estado.solicitante || ler(CHAVE_NOME);
+          estado.solicitante = SOLICITANTE_FIXO || estado.solicitante || ler(CHAVE_NOME);
           criarPedido(false);
         },
       });
@@ -456,7 +463,7 @@
   function retomar(em) {
     pararEspera();
     log.innerHTML = "";
-    estado = { solicitante: ler(CHAVE_NOME) };
+    estado = { solicitante: SOLICITANTE_FIXO || ler(CHAVE_NOME) };
     const t = TIPO[em.tipo] || { icone: "", rotulo: em.tipo };
     bot("Continuando o pedido de <b>" + esc(em.solicitante) + "</b> de " + fmtData(em.criado_em) + ":");
     eu(t.icone + " " + t.rotulo + " · NF " + nf(em.chave_nfe));

@@ -45,9 +45,12 @@ from .security import (
     require_acesso_completo_page,
     require_auth_api,
     require_auth_page,
+    require_emissao_api,
+    require_emissao_page,
     require_supervisor_api,
     require_supervisor_page,
     tem_acesso_completo,
+    pode_emitir_cte,
     pode_ver_sac,
     usuario_logado,
     verify_share_token,
@@ -92,6 +95,7 @@ templates.env.globals["tem_acesso_completo"] = tem_acesso_completo
 templates.env.globals["eh_supervisor"] = eh_supervisor
 templates.env.globals["usuario_logado"] = usuario_logado
 templates.env.globals["pode_ver_sac"] = pode_ver_sac
+templates.env.globals["pode_emitir_cte"] = pode_emitir_cte
 
 
 @app.exception_handler(HTTPException)
@@ -475,6 +479,7 @@ def _usuario_to_dict(u: Usuario, bloqueado_ate: datetime.datetime | None = None)
         "ativo": u.ativo,
         "email": u.email or "",
         "acesso_sac": bool(u.acesso_sac),
+        "emite_cte": bool(u.emite_cte),
         "trocar_senha": bool(u.trocar_senha),
         "empresas": json.loads(u.empresas or "[]"),
         "criado_em": u.criado_em.isoformat() + "Z" if u.criado_em else None,
@@ -534,7 +539,7 @@ def _validar_usuario(db: Session, payload: dict, usuario_id: int | None) -> tupl
     if existente and existente.id != usuario_id:
         return None, "Já existe um analista com esse login."
     return {"nome": nome, "login": login, "senha": senha, "empresas": empresas, "email": email or None,
-            "acesso_sac": bool(payload.get("acesso_sac"))}, None
+            "acesso_sac": bool(payload.get("acesso_sac")), "emite_cte": bool(payload.get("emite_cte"))}, None
 
 
 @app.post("/api/usuarios", dependencies=[Depends(require_supervisor_api)])
@@ -545,7 +550,7 @@ def api_usuarios_criar(payload: dict, db: Session = Depends(get_db)):
     u = Usuario(
         nome=dados["nome"], login=dados["login"], senha_hash=hash_senha(dados["senha"]),
         empresas=json.dumps(dados["empresas"], ensure_ascii=False), ativo=True, trocar_senha=True,
-        email=dados["email"], acesso_sac=dados["acesso_sac"],
+        email=dados["email"], acesso_sac=dados["acesso_sac"], emite_cte=dados["emite_cte"],
     )
     db.add(u)
     db.commit()
@@ -568,6 +573,8 @@ def api_usuarios_editar(usuario_id: int, payload: dict, db: Session = Depends(ge
         u.email = dados["email"]
     if "acesso_sac" in payload:
         u.acesso_sac = dados["acesso_sac"]
+    if "emite_cte" in payload:
+        u.emite_cte = dados["emite_cte"]
     if dados["senha"]:
         # Senha nova definida pelo supervisor é provisória: o analista troca
         # no próximo acesso.
@@ -683,23 +690,32 @@ def _disparar_emissao(db: Session, em: EmissaoCte, acao: str):
     return _emissao_to_dict(em)
 
 
-@app.get("/emissao", response_class=HTMLResponse, dependencies=[Depends(require_supervisor_page)])
+@app.get("/emissao", response_class=HTMLResponse, dependencies=[Depends(require_emissao_page)])
 def emissao_page(request: Request):
+    analista = usuario_logado(request)
     tipos = [
         {"valor": k, "rotulo": v[1], "icone": tipos_cte.EXPLICACOES[k][0], "explicacao": tipos_cte.EXPLICACOES[k][1]}
         for k, v in tipos_cte.TIPOS.items()
     ]
-    return templates.TemplateResponse("emissao.html", {"request": request, "active": "emissao", "tipos": tipos})
+    return templates.TemplateResponse("emissao.html", {
+        "request": request, "active": "emissao", "tipos": tipos,
+        # Analista: o pedido sai no nome dele (a tela não pergunta).
+        "solicitante_fixo": analista["nome"] if analista else "",
+    })
 
 
-@app.get("/api/emissoes", dependencies=[Depends(require_supervisor_api)])
-def api_emissoes_list(db: Session = Depends(get_db)):
+@app.get("/api/emissoes", dependencies=[Depends(require_emissao_api)])
+def api_emissoes_list(request: Request, db: Session = Depends(get_db)):
     _expirar_emissoes_paradas(db)
-    rows = db.query(EmissaoCte).order_by(EmissaoCte.criado_em.desc()).limit(30).all()
+    q = db.query(EmissaoCte)
+    analista = usuario_logado(request)
+    if analista:  # o analista vê os pedidos dele; o supervisor, todos
+        q = q.filter(EmissaoCte.solicitante == analista["nome"])
+    rows = q.order_by(EmissaoCte.criado_em.desc()).limit(30).all()
     return {"emissoes": [_emissao_to_dict(em) for em in rows]}
 
 
-@app.get("/api/emissoes/{emissao_id}", dependencies=[Depends(require_supervisor_api)])
+@app.get("/api/emissoes/{emissao_id}", dependencies=[Depends(require_emissao_api)])
 def api_emissoes_status(emissao_id: int, db: Session = Depends(get_db)):
     _expirar_emissoes_paradas(db)
     em = db.query(EmissaoCte).filter(EmissaoCte.id == emissao_id).first()
@@ -711,10 +727,13 @@ def api_emissoes_status(emissao_id: int, db: Session = Depends(get_db)):
 _STATUS_EM_ANDAMENTO = ("preparando", "escolher", "conferir", "salvando")
 
 
-@app.post("/api/emissoes", dependencies=[Depends(require_supervisor_api)])
-def api_emissoes_criar(payload: dict, db: Session = Depends(get_db)):
+@app.post("/api/emissoes", dependencies=[Depends(require_emissao_api)])
+def api_emissoes_criar(request: Request, payload: dict, db: Session = Depends(get_db)):
     tipo = str(payload.get("tipo") or "").strip()
     solicitante = str(payload.get("solicitante") or "").strip()[:120]
+    analista = usuario_logado(request)
+    if analista:
+        solicitante = analista["nome"]  # pedido do analista sai sempre no nome dele
     if tipo not in tipos_cte.TIPOS:
         return JSONResponse({"erro": "Escolha o tipo de CT-e."}, status_code=400)
     if not solicitante:
@@ -755,7 +774,7 @@ def _mudar_status(db: Session, emissao_id: int, de: tuple[str, ...], valores: di
     return db.query(EmissaoCte).filter(EmissaoCte.id == emissao_id).first() if alterados else None
 
 
-@app.post("/api/emissoes/{emissao_id}/escolher", dependencies=[Depends(require_supervisor_api)])
+@app.post("/api/emissoes/{emissao_id}/escolher", dependencies=[Depends(require_emissao_api)])
 def api_emissoes_escolher(emissao_id: int, payload: dict, db: Session = Depends(get_db)):
     cte_id = str(payload.get("cte_id") or "").strip()
     em = db.query(EmissaoCte).filter(EmissaoCte.id == emissao_id).first()
@@ -769,7 +788,7 @@ def api_emissoes_escolher(emissao_id: int, payload: dict, db: Session = Depends(
     return _disparar_emissao(db, em, "preparar")
 
 
-@app.post("/api/emissoes/{emissao_id}/salvar", dependencies=[Depends(require_supervisor_api)])
+@app.post("/api/emissoes/{emissao_id}/salvar", dependencies=[Depends(require_emissao_api)])
 def api_emissoes_salvar(emissao_id: int, payload: dict, db: Session = Depends(get_db)):
     try:
         frete = round(float(str(payload.get("frete") or "").replace(",", ".")), 2)
@@ -783,7 +802,7 @@ def api_emissoes_salvar(emissao_id: int, payload: dict, db: Session = Depends(ge
     return _disparar_emissao(db, em, "salvar")
 
 
-@app.post("/api/emissoes/{emissao_id}/cancelar", dependencies=[Depends(require_supervisor_api)])
+@app.post("/api/emissoes/{emissao_id}/cancelar", dependencies=[Depends(require_emissao_api)])
 def api_emissoes_cancelar(emissao_id: int, db: Session = Depends(get_db)):
     em = _mudar_status(db, emissao_id, ("escolher", "conferir", "erro"), {"status": "cancelado"})
     if not em:

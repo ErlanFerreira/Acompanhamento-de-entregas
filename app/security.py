@@ -112,6 +112,7 @@ def _carregar_sessao(request: Request) -> dict | None:
             data["usuario"] = {
                 "id": u.id, "nome": u.nome, "login": u.login, "empresas": json.loads(u.empresas or "[]"),
                 "trocar_senha": bool(u.trocar_senha), "acesso_sac": bool(u.acesso_sac),
+                "emite_cte": bool(u.emite_cte),
             }
         finally:
             db.close()
@@ -148,6 +149,15 @@ def pode_ver_sac(request: Request) -> bool:
         return True
     u = usuario_logado(request)
     return bool(u and u.get("acesso_sac") and not u.get("trocar_senha"))
+
+
+def pode_emitir_cte(request: Request) -> bool:
+    """Tela "Emissão de CT-e": o supervisor sempre; analista só se o
+    supervisor liberou na tela Usuários; nunca pelo link de acesso."""
+    if eh_supervisor(request):
+        return True
+    u = usuario_logado(request)
+    return bool(u and u.get("emite_cte") and not u.get("trocar_senha"))
 
 
 def escopo_empresas(request: Request) -> set[str] | None:
@@ -205,4 +215,17 @@ def require_supervisor_page(request: Request):
     """Telas só do supervisor (ex.: Usuários) -- os demais voltam pro painel."""
     require_auth_page(request)
     if not eh_supervisor(request):
+        raise HTTPException(status_code=303, headers={"Location": "/painel"})
+
+
+def require_emissao_api(request: Request):
+    require_auth_api(request)
+    if not pode_emitir_cte(request):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+def require_emissao_page(request: Request):
+    """Tela de emissão de CT-e -- quem não tem a permissão volta pro painel."""
+    require_auth_page(request)
+    if not pode_emitir_cte(request):
         raise HTTPException(status_code=303, headers={"Location": "/painel"})

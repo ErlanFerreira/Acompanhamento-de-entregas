@@ -174,7 +174,7 @@ python scripts/emitir_cte.py descarga <chave_nfe> --ver        # mostra o navega
 Usa `PORTAL_EMAIL`/`PORTAL_SENHA` do `.env`. O GW só aceita uma sessão por
 login, então quem estiver logado com o mesmo usuário no navegador cai.
 
-### Pelo painel (tela "Emissão de CT-e", só supervisor)
+### Pelo painel (tela "Emissão de CT-e")
 
 O mesmo bot, sem terminal, como um assistente de perguntas e respostas
 (`static/emissao.js`): que tipo de CT-e (com explicação de cada um), qual a
@@ -193,6 +193,10 @@ chave da NF-e (conferida enquanto digita), quem está pedindo. O workflow
 Mesma NF e mesmo tipo: um pedido em andamento é retomado em vez de abrir
 outro, e um CT-e já salvo só é emitido de novo se a pessoa confirmar. Os
 pedidos ficam no banco separado (`CONSULTAS_DATABASE_URL`), como as consultas.
+
+Quem pode usar: o supervisor e os analistas marcados em **Usuários →
+"Pode emitir CT-e"**. O pedido do analista sai no nome dele (a tela não
+pergunta) e ele vê só os pedidos dele em "Pedidos recentes".
 
 As emissões rodam uma por vez (`concurrency` do workflow). Configuração:
 
