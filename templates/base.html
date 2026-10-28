@@ -25,9 +25,6 @@
       {% if eh_supervisor(request) %}
       <a href="/usuarios" class="nav-link {{ 'active' if active == 'usuarios' else '' }}">Usuários</a>
       {% endif %}
-      {% if pode_ver_sac(request) %}
-      <a href="https://transrota-sac.web.app/" target="_blank" rel="noopener noreferrer" class="nav-link">Portal SAC ↗</a>
-      {% endif %}
     </nav>
     <div class="sidebar-footer">
       {% set analista = usuario_logado(request) %}

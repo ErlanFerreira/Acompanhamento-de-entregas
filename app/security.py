@@ -142,15 +142,6 @@ def usuario_logado(request: Request) -> dict | None:
     return sessao.get("usuario") if sessao else None
 
 
-def pode_ver_sac(request: Request) -> bool:
-    """Atalho do portal do SAC no menu: o supervisor sempre; analista só se o
-    supervisor liberou na tela Usuários; nunca pelo link de acesso."""
-    if eh_supervisor(request):
-        return True
-    u = usuario_logado(request)
-    return bool(u and u.get("acesso_sac") and not u.get("trocar_senha"))
-
-
 def pode_emitir_cte(request: Request) -> bool:
     """Tela "Emissão de CT-e": o supervisor sempre; analista só se o
     supervisor liberou na tela Usuários; nunca pelo link de acesso."""
