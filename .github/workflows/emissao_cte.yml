@@ -47,6 +47,9 @@ jobs:
           # pra não derrubar a sessão de ninguém.
           PORTAL_EMAIL: ${{ secrets.GW_BOT_EMAIL }}
           PORTAL_SENHA: ${{ secrets.GW_BOT_SENHA }}
+          # CNPJ da organização, só se o usuário do robô tiver acesso de
+          # Colaborador em mais de uma (ver _escolher_organizacao em scrape.py).
+          PORTAL_ORGANIZACAO: ${{ secrets.GW_BOT_ORGANIZACAO }}
 
       - uses: actions/upload-artifact@v4
         if: always()

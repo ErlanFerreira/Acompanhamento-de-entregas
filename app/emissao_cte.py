@@ -222,6 +222,7 @@ def _ler_formulario(frame: Frame) -> dict:
                 id_original: v('id_dev_reen'), id_conhecimento: v('idConhecimento'),
                 observacao: [1, 2, 3, 4, 5].map(i => v('obs_lin' + i)).filter(Boolean).join(' | '),
                 tabela_id: v('client_tariff_id'),
+                tipo_gw: v('tipoConhecimento'),
                 composicao: soma,
             };
         }""",
@@ -466,9 +467,17 @@ def emitir(
             frame.select_option("#tipoConhecimento", valor_tipo)
             frame.wait_for_timeout(800)
 
-            if valor_tipo in TIPOS_DA_NOTA:
+            if tipo in TIPOS_DA_NOTA:
                 original = None
                 dados = _importar_nota(context, frame, chave)
+                if dados["tipo_gw"] != valor_tipo:
+                    # A importação não pode trocar o tipo (ex.: devolução com
+                    # NFD virar Normal) -- volta pro escolhido.
+                    frame.select_option("#tipoConhecimento", valor_tipo)
+                    frame.wait_for_timeout(800)
+                    dados = _ler_formulario(frame)
+                    if dados["tipo_gw"] != valor_tipo:
+                        raise EmissaoError(f"O GW trocou o tipo do CT-e ao importar a nota ({dados['tipo_gw']}).")
             else:
                 original = _carregar_original(context, frame, chave, rotulo_tipo, cte_id, escolher_cte)
                 page.wait_for_load_state("networkidle")

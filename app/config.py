@@ -16,6 +16,10 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 # que tem visão completa da empresa via o relatório personalizado "Pendências").
 PORTAL_EMAIL = os.environ.get("PORTAL_EMAIL", "")
 PORTAL_SENHA = os.environ.get("PORTAL_SENHA", "")
+# CNPJ da organização a escolher quando o login do portal tem acesso de
+# Colaborador em mais de uma (ex.: o usuário próprio do robô de emissão de
+# CT-e). Vazio = só serve se houver uma organização de Colaborador.
+PORTAL_ORGANIZACAO = os.environ.get("PORTAL_ORGANIZACAO", "")
 
 SYNC_WINDOW_DAYS = int(os.environ.get("SYNC_WINDOW_DAYS", "90"))
 

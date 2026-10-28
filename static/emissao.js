@@ -158,17 +158,41 @@
   function perguntarTipo() {
     passo(1);
     const m = bot("Que tipo de CT-e você precisa emitir?");
-    opcoes(m.area, TIPOS.map(t => ({
+    opcoes(m.area, TIPOS.filter(t => !t.oculto).map(t => ({
       classe: "cv-opcao",
       html: '<span class="ic">' + t.icone + "</span><span><b>" + esc(t.rotulo) + "</b><small>" + esc(t.explicacao) + "</small></span>",
       fala: t.icone + " " + t.rotulo,
-      acao: () => { estado.tipo = t.valor; perguntarChave(); },
+      acao: () => {
+        estado.tipo = t.valor;
+        if (t.valor === "devolucao") perguntarNfd(); else perguntarChave();
+      },
     })), "cv-tipos");
+  }
+
+  // Devolução: com NFD o CT-e sai da própria NFD; sem, do CT-e que está
+  // sendo devolvido (achado pela chave da nota original).
+  function perguntarNfd() {
+    const m = bot("Tem a <b>NFD</b> (nota fiscal de devolução emitida pelo cliente)?");
+    opcoes(m.area, [
+      {
+        rotulo: "📄 Sim, tenho a NFD", classe: "btn-primary", fala: "Sim, tenho a NFD",
+        acao: () => { estado.tipo = "devolucao_nfd"; perguntarChave(); },
+      },
+      {
+        rotulo: "Não, é sem NFD", fala: "Não, é sem NFD",
+        acao: () => { estado.tipo = "devolucao"; perguntarChave(); },
+      },
+    ]);
   }
 
   function perguntarChave() {
     passo(2);
-    const m = bot("Qual é a <b>chave de acesso da NF-e</b>? Pode digitar ou bipar o código de barras da DANFE.");
+    const PERGUNTA_CHAVE = {
+      devolucao_nfd: "Qual é a <b>chave de acesso da NFD</b>? O CT-e de devolução vai só com ela.",
+      devolucao: "Qual é a <b>chave da NF-e original</b> — a nota que está sendo devolvida? Com ela eu acho o CT-e no GW.",
+    };
+    const m = bot((PERGUNTA_CHAVE[estado.tipo] || "Qual é a <b>chave de acesso da NF-e</b>?") +
+      " Pode digitar ou bipar o código de barras da DANFE.");
     m.area.innerHTML =
       '<form class="cv-entrada cv-chave" autocomplete="off">' +
       '<input type="text" inputmode="numeric" maxlength="60" placeholder="44 dígitos" aria-label="Chave de acesso da NF-e">' +
@@ -352,6 +376,7 @@
     const NOTAS = {
       devolucao: "Como é devolução, o GW já inverteu remetente e destinatário.",
       cortesia: "Cortesia não entra no contas a receber.",
+      devolucao_nfd: "O CT-e vai com a NFD — remetente e destinatário vêm da própria nota de devolução.",
     };
     const nota = NOTAS[em.tipo] ? '<div class="cv-dica">' + NOTAS[em.tipo] + "</div>" : "";
     const ficha = fichaHtml([["Remetente", esc(r.remetente)], ["Destinatário", esc(r.destinatario)], ["Quem paga", esc(r.tomador)]]);

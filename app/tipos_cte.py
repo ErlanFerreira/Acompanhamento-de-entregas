@@ -14,6 +14,7 @@ TIPOS = {
     "normal": ("n", "Normal"),
     "reentrega": ("r", "Reentrega"),
     "devolucao": ("d", "Devolução"),
+    "devolucao_nfd": ("d", "Devolução com NFD"),
     "diaria": ("i", "Diárias"),
     "descarga": ("g", "Descarga"),
     "coleta_pallets": ("p", "Coleta/Pallets"),
@@ -22,13 +23,20 @@ TIPOS = {
     "cortesia": ("b", "Cortesia"),
 }
 
-# Tipos que vêm direto da nota (importada no GW), sem CT-e original.
-TIPOS_DA_NOTA = {"n", "b"}
+# Tipos que vêm direto da nota (importada no GW), sem CT-e original. A
+# devolução com NFD vai só com a NFD (nota de devolução do cliente): remetente
+# e destinatário saem dela, sem procurar o CT-e que está sendo devolvido.
+TIPOS_DA_NOTA = {"normal", "cortesia", "devolucao_nfd"}
+
+# Não aparecem como opção na tela: a devolução com NFD é escolhida pela
+# pergunta "tem NFD?" depois de clicar em Devolução.
+TIPOS_OCULTOS = {"devolucao_nfd"}
 
 # Pra tela de emissão do painel: ícone e explicação em linguagem do dia a dia.
 EXPLICACOES = {
     "normal": ("🚚", "CT-e comum de uma nota que ainda não tem CT-e — o GW importa a nota e calcula o frete pela tabela."),
     "coleta_pallets": ("🪵", "Cobrança da coleta ou devolução de pallets ligada a um CT-e já emitido."),
+    "devolucao_nfd": ("↩️", "Devolução emitida a partir da NFD (nota de devolução do cliente)."),
     "cortesia": ("🎁", "Transporte sem cobrança — não entra no contas a receber. A nota é importada como no Normal."),
     "reentrega": ("🔁", "A entrega não deu certo e a mercadoria vai sair de novo para o mesmo destinatário."),
     "devolucao": ("↩️", "A mercadoria volta para o remetente — o GW inverte remetente e destinatário."),

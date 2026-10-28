@@ -153,7 +153,11 @@ achar o CT-e original — o GW copia remetente, destinatário, tomador e notas.
 Se a NF estiver em mais de um CT-e, ele pergunta qual usar. **Normal** e
 **Cortesia** não têm CT-e original: o bot importa a nota pelo "Importar
 XML/DANFE" do GW (procura no banco do GW e no servidor DF-e; a consulta
-pública fica de fora porque pede captcha).
+pública fica de fora porque pede captcha). Na **Devolução** a tela pergunta
+se tem NFD: com NFD, o CT-e sai da própria NFD (importada como no Normal,
+com o tipo Devolução, só com ela); sem NFD, pela chave da nota original o
+bot acha o CT-e que está sendo devolvido e o GW inverte remetente e
+destinatário.
 
 O frete segue a regra do próprio GW:
 
@@ -213,6 +217,10 @@ As emissões rodam uma por vez (`concurrency` do workflow). Configuração:
 - No GitHub, **Settings → Secrets and variables → Actions**: criar
   `GW_BOT_EMAIL` e `GW_BOT_SENHA` com esse login.
 - O `GITHUB_DISPATCH_TOKEN` da Vercel já serve (o mesmo das Consultas).
+- Se o usuário do robô tiver acesso de Colaborador em mais de uma
+  organização, o GW pede pra escolher depois da senha: crie também o Secret
+  `GW_BOT_ORGANIZACAO` com o CNPJ da certa (sem ele, o robô para avisando,
+  em vez de escolher sozinho).
 
 ## Estrutura do projeto
 

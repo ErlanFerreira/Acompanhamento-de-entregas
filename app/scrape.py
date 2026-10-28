@@ -170,6 +170,44 @@ _SEL_SENHA = 'input[type="password"], input[name="password"], input[name="senha"
 _SEL_ENTRAR = "button.button-login"
 
 
+def _escolher_organizacao(page: Page) -> None:
+    """Login com acesso a mais de uma organização (ou mais de um tipo de
+    acesso -- Cliente/Representante/Colaborador): depois da senha o portal
+    mostra "Selecione a organização desejada" e só entra depois do clique.
+    Escolhe a de acesso Colaborador (ícone fa-user-circle); se houver mais de
+    uma, a do CNPJ em PORTAL_ORGANIZACAO. Nunca chuta: com mais de uma e sem
+    a variável, para com a lista -- pra não lançar nada na empresa errada."""
+    if page.url.startswith("http") and "/login" not in page.url:
+        return  # já entrou (login de uma organização só)
+    itens = page.locator("div.organizacao")
+    try:
+        itens.first.wait_for(state="visible", timeout=4000)
+    except PlaywrightTimeoutError:
+        return  # login de uma organização só: o portal entra direto
+    colaborador = page.locator("div.organizacao:has(i.fa-user-circle)")
+    opcoes = [" ".join(t.split()) for t in colaborador.all_inner_texts()]
+    if not opcoes:
+        todas = [" ".join(t.split()) for t in itens.all_inner_texts()]
+        raise ScrapeError(f"O login do portal não tem acesso de Colaborador em nenhuma organização: {todas}")
+    escolhido = 0
+    if len(opcoes) > 1:
+        cnpj = re.sub(r"\D", "", config.PORTAL_ORGANIZACAO or "")
+        iguais = [i for i, t in enumerate(opcoes) if cnpj and cnpj in re.sub(r"\D", "", t)]
+        if len(iguais) != 1:
+            raise ScrapeError(
+                "O login do portal tem acesso de Colaborador em mais de uma organização "
+                f"({' | '.join(opcoes)}) -- informe o CNPJ da certa em PORTAL_ORGANIZACAO."
+            )
+        escolhido = iguais[0]
+    logger.info("Entrando na organização: %s", opcoes[escolhido])
+    colaborador.nth(escolhido).click(timeout=10_000)
+    try:
+        page.wait_for_url(lambda u: "/login" not in u, timeout=45_000)
+    except PlaywrightTimeoutError:
+        pass
+    _aguardar_ocioso(page)
+
+
 def _estrutura_login(page: Page) -> str:
     """Campos e botões da tela de login (nomes, não valores) -- pra notar se o
     portal mudou o formulário (ex: campo novo obrigatório)."""
@@ -242,6 +280,7 @@ def _login(page: Page) -> None:
             avisos.append(" / ".join(novas)[:200])
         page.wait_for_timeout(2000)
         _aguardar_ocioso(page)
+        _escolher_organizacao(page)
 
     if "/login" in page.url:
         _salvar_debug(page, "login")

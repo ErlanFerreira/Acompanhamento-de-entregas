@@ -23,7 +23,7 @@ from dataclasses import asdict
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db import SessionLocal  # noqa: E402
-from app.emissao_cte import TIPOS, TIPOS_DA_NOTA, EmissaoError, emitir  # noqa: E402
+from app.emissao_cte import TIPOS_DA_NOTA, EmissaoError, emitir  # noqa: E402
 from app.models import EmissaoCte  # noqa: E402
 
 
@@ -84,7 +84,7 @@ def preparar(db, em: EmissaoCte) -> None:
 
 
 def salvar(db, em: EmissaoCte) -> None:
-    da_nota = TIPOS[em.tipo][0] in TIPOS_DA_NOTA
+    da_nota = em.tipo in TIPOS_DA_NOTA
     if (not da_nota and not em.cte_original_id) or not em.frete_final:
         raise EmissaoError("Pedido sem CT-e original ou frete confirmado -- refaça pela tela.")
 
