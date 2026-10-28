@@ -36,6 +36,7 @@ _COLUNAS_ADICIONADAS = {
         "salvar_direto": "BOOLEAN DEFAULT FALSE",
         "executor": "VARCHAR(60)",
         "lote": "VARCHAR(20)",
+        "cubagem": "FLOAT",
     },
     "usuarios": {
         "trocar_senha": "BOOLEAN DEFAULT TRUE",

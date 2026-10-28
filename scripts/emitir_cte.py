@@ -105,6 +105,7 @@ def main() -> int:
     parser.add_argument("--simular", action="store_true", help="não salva, só mostra o que sairia")
     parser.add_argument("--ver", action="store_true", help="mostra o navegador")
     parser.add_argument("--solicitante", help="nome de quem pediu (vai na observação do CT-e)")
+    parser.add_argument("--cubagem", type=_valor, help="m³ da carga, se o frete do cliente for por cubagem (ex: 1,25)")
     args = parser.parse_args()
 
     print("Entrando no GW e buscando o CT-e da NF...")
@@ -113,7 +114,7 @@ def main() -> int:
             args.tipo, args.chave,
             escolher_cte=escolher_cte, informar_frete=informar_frete,
             perguntar=perguntar, confirmar=confirmar,
-            frete_manual=args.frete, solicitante=args.solicitante, simular=args.simular, headless=not args.ver,
+            frete_manual=args.frete, solicitante=args.solicitante, cubagem=args.cubagem, simular=args.simular, headless=not args.ver,
         )
     except EmissaoError as e:
         print(f"\nERRO: {e}")

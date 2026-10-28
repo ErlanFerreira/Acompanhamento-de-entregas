@@ -392,8 +392,48 @@
     perguntarFrete(em);
   }
 
+  // Frete do cliente por peso/cubagem e a nota sem os m³: pergunta a cubagem
+  // e o GW calcula o frete pela tabela (em vez de a pessoa digitar o frete).
+  function perguntarCubagem(em) {
+    const m = bot("O frete desse cliente é por <b>peso/cubagem</b> e a nota não traz os m³. " +
+      "<b>Qual a cubagem desta nota (em m³)?</b> O GW calcula o frete pela tabela.");
+    m.area.innerHTML =
+      '<form class="cv-entrada cv-valor" autocomplete="off">' +
+      '<input type="text" inputmode="decimal" placeholder="ex.: 1,25" aria-label="Cubagem em metros cúbicos"><span class="cv-rs">m³</span>' +
+      '<button type="submit" class="btn-primary">Calcular</button></form><div class="cv-dica"></div>';
+    const form = m.area.querySelector("form");
+    const input = form.querySelector("input");
+    const dica = m.area.querySelector(".cv-dica");
+    const outro = document.createElement("div");
+    m.area.appendChild(outro);
+    opcoes(outro, [{ rotulo: "Prefiro digitar o valor do frete", acao: () => { m.area.innerHTML = ""; perguntarValor(em, "Qual o valor do frete?"); } }]);
+    form.addEventListener("submit", async e => {
+      e.preventDefault();
+      const v = lerValor(input.value);
+      if (!(v > 0)) {
+        dica.textContent = "Digite a cubagem em m³, por exemplo 1,25.";
+        dica.className = "cv-dica erro";
+        input.focus();
+        return;
+      }
+      m.area.innerHTML = "";
+      eu(String(v).replace(".", ",") + " m³");
+      const r = await api("/api/emissoes/" + em.id + "/cubagem", { method: "POST", body: JSON.stringify({ cubagem: v }) })
+        .catch(err => ({ ok: false, body: { erro: err.message } }));
+      if (!r.ok) {
+        const e2 = bot("😕 Não consegui seguir: " + msgErro(r.body.erro));
+        opcoes(e2.area, [{ rotulo: "Começar de novo", classe: "btn-primary", fala: null, acao: inicio }]);
+        return;
+      }
+      acompanhar(r.body);
+      carregarRecentes();
+    });
+    input.focus();
+  }
+
   function perguntarFrete(em) {
     const r = em.resumo || {};
+    if (em.frete_calculado == null && r.precisa_cubagem) return perguntarCubagem(em);
     if (em.frete_calculado != null) {
       // "tabela de preço do tomador" sozinho só repetiria a frase.
       const detalhe = r.origem_frete && r.origem_frete !== "tabela de preço do tomador"

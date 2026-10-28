@@ -36,8 +36,14 @@
         <span class="bip-label">Tipo de CT-e (o mesmo para todas as notas)</span>
         <select id="lt-tipo" required></select>
       </label>
+      <div class="lt-xml">
+        <label class="btn"><input type="file" id="lt-xml-arquivos" accept=".xml,text/xml" multiple hidden>📄 Escolher arquivos XML</label>
+        <label class="btn"><input type="file" id="lt-xml-pasta" webkitdirectory multiple hidden>📂 Escolher uma pasta de XML</label>
+        <span class="cv-dica">um CT-e para cada XML de NF-e — as chaves vão para a lista abaixo</span>
+      </div>
+      <div class="cv-dica" id="lt-xml-status"></div>
       <label class="lt-campo lt-chaves">
-        <span class="bip-label" id="lt-chaves-rotulo">Chaves de acesso — uma por linha (pode bipar uma atrás da outra)</span>
+        <span class="bip-label" id="lt-chaves-rotulo">Chaves de acesso — uma por linha (pode bipar uma atrás da outra). Frete por cubagem? Ponha os m³ depois de um ponto e vírgula: <code>chave;1,25</code></span>
         <textarea id="lt-chaves" rows="8" spellcheck="false" placeholder="26261009722463000131550060007711051171417923&#10;…"></textarea>
         <span class="cv-dica" id="lt-contagem">Nenhuma chave ainda.</span>
       </label>

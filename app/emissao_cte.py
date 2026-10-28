@@ -94,6 +94,9 @@ class Resultado:
     origem_frete: str
     observacao: str = ""
     frete_pendente: bool = False
+    # Frete do tomador é por peso/cubagem e a nota não traz os m³: quem pediu
+    # informa a cubagem e o GW calcula pela tabela (em vez de digitar o frete).
+    precisa_cubagem: bool = False
     salvo: bool = False
     mensagens: list[str] = field(default_factory=list)
 
@@ -173,6 +176,25 @@ def _pesquisar_por_chave(popup: Page, chave: str) -> None:
         popup.click("#pesquisar")
 
 
+# Normal/Cortesia saem da nota: se ela já tem CT-e no GW, emitir de novo
+# duplicaria o frete -- quem for cobrar outra coisa usa reentrega,
+# complementar etc.
+_TIPOS_CHECAR_EXISTENTE = {"normal", "cortesia"}
+
+
+def _ctes_da_nota(context, chave: str) -> list[CteOriginal]:
+    """CT-e do GW (todas as filiais) que já têm essa NF-e -- a mesma busca
+    do popup "Localizar conhecimento", aberta numa aba à parte (só leitura)."""
+    aba = context.new_page()
+    try:
+        aba.goto(f"{scrape.PORTAL_URL}/pops/localiza_conhecimento.jsp?acao=iniciar&tipoConhecimento=r"
+                 "&isCancelado=false&filialId=0", wait_until="networkidle")
+        _pesquisar_por_chave(aba, chave)
+        return _ler_resultados(aba)
+    finally:
+        aba.close()
+
+
 def _ler_resultados(popup: Page) -> list[CteOriginal]:
     linhas = popup.evaluate(
         """() => [...document.querySelectorAll('div.linkEditar[onclick*="retornapai("]')].map(div => {
@@ -223,6 +245,7 @@ def _ler_formulario(frame: Frame) -> dict:
                 observacao: [1, 2, 3, 4, 5].map(i => v('obs_lin' + i)).filter(Boolean).join(' | '),
                 tabela_id: v('client_tariff_id'),
                 tipo_gw: v('tipoConhecimento'),
+                tipo_taxa: v('tipotaxa'), cub_metro: v('cub_metro'),
                 composicao: soma,
             };
         }""",
@@ -320,7 +343,15 @@ def _carregar_original(context, frame: Frame, chave: str, rotulo_tipo: str, cte_
     return original
 
 
-def _importar_nota(context, frame: Frame, chave: str) -> dict:
+# Avisos do GW quando o servidor dele engasga (passageiro).
+_INSTAVEL = ("status: 502", "tempo limite", "status: 503", "status: 504")
+
+
+def _gw_instavel(mensagens: list[str]) -> bool:
+    return any(t in m.lower() for m in mensagens for t in _INSTAVEL)
+
+
+def _importar_nota(context, frame: Frame, chave: str, dialogos: Optional[_Dialogos] = None) -> dict:
     """Normal/Cortesia: "Importar XML/DANFE" do GW com a chave da NF-e. O GW
     procura a nota no banco dele e, se não tiver, no servidor DF-e; a consulta
     pública fica desligada (pede captcha). Só preenche a tela -- não grava
@@ -337,18 +368,45 @@ def _importar_nota(context, frame: Frame, chave: str) -> dict:
         if (api) api.checked = false;
     }""")
     popup.fill("#chaveAcessoNFe_0", chave)
-    popup.click("#consultarChaveAcesso_0")
-    try:
-        popup.wait_for_selector("#removerChaveAcesso_0", state="visible", timeout=90_000)
-    except PlaywrightTimeoutError:
+    avisos = dialogos.mensagens if dialogos is not None else []
+    achou = False
+    for tentativa in range(3):
+        # O servidor do GW às vezes responde "Status: 502 / tempo limite" na
+        # busca da nota: espera um pouco e tenta de novo (até 2 vezes).
+        antes = len(avisos)
+        popup.click("#consultarChaveAcesso_0")
+        for _ in range(90):
+            if popup.is_visible("#removerChaveAcesso_0"):
+                achou = True
+                break
+            if _gw_instavel(avisos[antes:]):
+                break
+            popup.wait_for_timeout(1000)
+        if achou or not _gw_instavel(avisos[antes:]):
+            break
+        logger.info("GW instável ao buscar a NF-e %s -- tentando de novo (%s).", chave, tentativa + 1)
+        popup.wait_for_timeout(5000 * (tentativa + 1))
+    if not achou:
         scrape._salvar_debug(popup, "emissao_cte_importar")
+        if _gw_instavel(avisos):
+            raise EmissaoError(
+                "O GW está instável (erro 502 / tempo esgotado) e não respondeu à busca da nota, mesmo "
+                "tentando 3 vezes. Tente de novo em alguns minutos."
+            )
         raise EmissaoError(
             f"O GW não encontrou a NF-e {chave} (nem no banco dele, nem no servidor DF-e). "
             "Confira a chave -- ou importe o XML da nota no GW e peça de novo."
         )
     popup.click("#btVisualizar")
     # O GW importa e preenche a tela de cadastro (remetente, notas, frete).
-    frame.wait_for_function("() => (document.getElementById('rem_rzs') || {}).value", timeout=120_000)
+    try:
+        frame.wait_for_function("() => (document.getElementById('rem_rzs') || {}).value", timeout=120_000)
+    except PlaywrightTimeoutError:
+        raise EmissaoError(
+            "O GW não terminou de importar a nota" +
+            (" (servidor instável: erro 502 / tempo esgotado)" if _gw_instavel(avisos) else "") +
+            ". Tente de novo em alguns minutos."
+        )
     try:
         popup.wait_for_event("close", timeout=30_000)
     except PlaywrightTimeoutError:
@@ -357,8 +415,29 @@ def _importar_nota(context, frame: Frame, chave: str) -> dict:
     return _ler_formulario(frame)
 
 
+MOTIVO_CUBAGEM = "falta a cubagem (m³) da nota -- o frete desse cliente é por peso/cubagem"
+
+
+def _falta_cubagem(dados: dict) -> bool:
+    # Tipo de taxa "Peso/Cubagem" (1) sem os m³: o GW avisa e não calcula
+    # (a nota fiscal não traz a cubagem).
+    return dados.get("tipo_taxa") == "1" and _num(dados.get("cub_metro")) <= 0
+
+
+def _informar_cubagem(frame: Frame, cubagem: float) -> dict:
+    """Preenche o "=  m³" da cubagem como uma pessoa faria; o GW busca a
+    tabela do tomador (com a base kg/m³ dele) e recalcula o frete -- usando o
+    maior entre o peso real e o cubado."""
+    frame.fill("#cub_metro", f"{cubagem:.4f}")
+    frame.dispatch_event("#cub_metro", "change")
+    frame.wait_for_timeout(4000)
+    return _ler_formulario(frame)
+
+
 def _frete_da_nota(dados: dict, valor_gw: float, mensagens: list[str]) -> tuple[Optional[float], str]:
     """Normal/Cortesia: o GW calcula pela tabela do tomador ao importar."""
+    if _falta_cubagem(dados):
+        return None, MOTIVO_CUBAGEM
     sem_tabela = any("não possui tabela de preço" in m for m in mensagens)
     if sem_tabela or int(_num(dados.get("tabela_id"))) <= 0:
         return None, "o tomador não tem tabela de preço no GW"
@@ -434,6 +513,7 @@ def emitir(
     simular: bool = False,
     headless: bool = True,
     sessao: Optional["SessaoGW"] = None,
+    cubagem: Optional[float] = None,
 ) -> Resultado:
     """Lança o CT-e `tipo` (chave de `TIPOS`) para a NF-e informada e salva
     sem transmitir. `simular=True` faz tudo menos salvar.
@@ -449,6 +529,8 @@ def emitir(
     - cte_id: id (do GW) do CT-e original já escolhido antes -- pula o
       escolher_cte.
     - solicitante: nome de quem pediu -- vai na observação do CT-e.
+    - cubagem: m³ da carga (Normal/Cortesia), quando o frete do tomador é por
+      cubagem e a nota não traz -- o GW calcula o frete com ela.
     - sessao: navegador já logado (robô local, ver SessaoGW) -- sem ela,
       abre um navegador, entra no GW e sai no fim.
     """
@@ -459,7 +541,7 @@ def emitir(
     dialogos = _Dialogos(perguntar)
 
     args = (tipo, chave, valor_tipo, rotulo_tipo, dialogos, escolher_cte, informar_frete, confirmar,
-            frete_manual, cte_id, solicitante, simular)
+            frete_manual, cte_id, solicitante, simular, cubagem)
     if sessao is not None:
         return _emitir(sessao, *args)
     with SessaoGW(headless=headless) as nova:
@@ -513,7 +595,7 @@ class SessaoGW:
 
 
 def _emitir(sessao: SessaoGW, tipo, chave, valor_tipo, rotulo_tipo, dialogos, escolher_cte, informar_frete,
-            confirmar, frete_manual, cte_id, solicitante, simular) -> Resultado:
+            confirmar, frete_manual, cte_id, solicitante, simular, cubagem=None) -> Resultado:
     page, context = sessao.page, sessao.context
     frame = sessao.comecar(dialogos)
 
@@ -522,7 +604,15 @@ def _emitir(sessao: SessaoGW, tipo, chave, valor_tipo, rotulo_tipo, dialogos, es
 
     if tipo in TIPOS_DA_NOTA:
         original = None
-        dados = _importar_nota(context, frame, chave)
+        if tipo in _TIPOS_CHECAR_EXISTENTE:
+            existentes = _ctes_da_nota(context, chave)
+            if existentes:
+                lista = ", ".join(f"{c.numero} série {c.serie} de {c.emissao}" for c in existentes[:3])
+                raise EmissaoError(
+                    f"Essa NF-e já tem CT-e no GW ({lista}) -- não emiti outro {rotulo_tipo} pra não "
+                    "duplicar. Se for outra cobrança, use Reentrega, Complementar etc."
+                )
+        dados = _importar_nota(context, frame, chave, dialogos)
         if dados["tipo_gw"] != valor_tipo:
             # A importação não pode trocar o tipo (ex.: devolução com
             # NFD virar Normal) -- volta pro escolhido.
@@ -531,6 +621,8 @@ def _emitir(sessao: SessaoGW, tipo, chave, valor_tipo, rotulo_tipo, dialogos, es
             dados = _ler_formulario(frame)
             if dados["tipo_gw"] != valor_tipo:
                 raise EmissaoError(f"O GW trocou o tipo do CT-e ao importar a nota ({dados['tipo_gw']}).")
+        if cubagem and cubagem > 0:
+            dados = _informar_cubagem(frame, cubagem)
     else:
         original = _carregar_original(context, frame, chave, rotulo_tipo, cte_id, escolher_cte)
         page.wait_for_load_state("networkidle")
@@ -548,6 +640,8 @@ def _emitir(sessao: SessaoGW, tipo, chave, valor_tipo, rotulo_tipo, dialogos, es
     else:
         if original is None:
             frete, origem = _frete_da_nota(dados, valor_gw, dialogos.mensagens)
+            if frete is not None and cubagem:
+                origem = f"{origem}, com {cubagem:g} m³".replace(".", ",")
         else:
             frete, origem = _frete_da_tabela(valor_tipo, original, valor_gw)
         if frete is None:
@@ -576,6 +670,7 @@ def _emitir(sessao: SessaoGW, tipo, chave, valor_tipo, rotulo_tipo, dialogos, es
         origem_frete=origem,
         observacao=dados["observacao"],
         frete_pendente=frete_pendente,
+        precisa_cubagem=frete_pendente and origem == MOTIVO_CUBAGEM,
         mensagens=dialogos.mensagens,
     )
     if frete_pendente:

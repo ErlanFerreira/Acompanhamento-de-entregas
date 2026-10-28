@@ -226,6 +226,23 @@ nota em mais de um CT-e, erro) fica na lista do lote com "Resolver", que abre
 o pedido na conversa. Sem "salvar direto", o lote volta para conferir e o botão
 "Salvar os N…" salva todos de uma vez com o frete calculado.
 
+Também dá pra **escolher arquivos ou uma pasta de XML de NF-e** na aba de lote:
+a tela lê os XML no próprio navegador (eles não sobem pro servidor), tira a
+chave de cada nota e preenche a lista — um CT-e para cada XML (tipo Normal, por
+padrão). Quem importa a nota de verdade é o GW, pela chave (banco do GW ou
+servidor DF-e); se o GW estiver instável (erro 502 / tempo esgotado), o robô
+tenta de novo até 3 vezes.
+
+**Frete por cubagem:** quando o frete do tomador é por peso/cubagem e a nota não
+traz os m³ (caso da FOTUS), o pedido volta como **"✋ Falta a cubagem"**: no lote,
+cada linha tem o campo m³ + "Calcular" (ou já envie `chave;1,25` na lista); na
+conversa, o assistente pergunta a cubagem. Com os m³, o GW calcula o frete pela
+tabela (usando o maior entre o peso real e o cubado).
+
+**Normal/Cortesia não duplicam:** antes de importar, o robô procura no GW se a
+nota já tem CT-e; se tiver, recusa e diz qual (outra cobrança vai como
+reentrega, complementar etc.).
+
 Instalação no PC (uma vez):
 
 ```bash

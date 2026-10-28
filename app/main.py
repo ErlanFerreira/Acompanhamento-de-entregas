@@ -696,6 +696,7 @@ def _emissao_to_dict(em: EmissaoCte) -> dict:
         "executor": em.executor,
         "lote": em.lote,
         "salvar_direto": bool(em.salvar_direto),
+        "cubagem": em.cubagem,
     }
 
 
@@ -791,6 +792,15 @@ def api_emissoes_lote(request: Request, payload: dict, db: Session = Depends(get
     lote = datetime.datetime.utcnow().strftime("%y%m%d%H%M%S%f")[:16]
     criados, recusadas, vistas = [], [], set()
     for linha in linhas:
+        # "chave" ou "chave;m³" (cubagem, pro frete por peso/cubagem).
+        partes = re.split(r"[;\t ]+", linha, maxsplit=1)
+        linha, cubagem = partes[0], None
+        if len(partes) > 1 and partes[1].strip():
+            try:
+                cubagem = float(partes[1].strip().replace(",", "."))
+            except ValueError:
+                recusadas.append({"chave": linha, "motivo": f"Cubagem inválida ({partes[1].strip()})"})
+                continue
         try:
             chave = tipos_cte.validar_chave_nfe(linha)
         except tipos_cte.EmissaoError as e:
@@ -809,7 +819,8 @@ def api_emissoes_lote(request: Request, payload: dict, db: Session = Depends(get
             recusadas.append({"chave": chave, "motivo": f"Já tem CT-e salvo com esse tipo ({salvo.numero_ct})."})
             continue
         em = EmissaoCte(tipo=tipo, chave_nfe=chave, solicitante=solicitante, status="preparando",
-                        lote=lote, salvar_direto=bool(payload.get("salvar_direto")))
+                        lote=lote, salvar_direto=bool(payload.get("salvar_direto")),
+                        cubagem=cubagem if cubagem and cubagem > 0 else None)
         db.add(em)
         criados.append(em)
     db.commit()
@@ -905,6 +916,23 @@ def api_emissoes_salvar(emissao_id: int, payload: dict, db: Session = Depends(ge
     if not em:
         return JSONResponse({"erro": "Esse pedido não está mais aguardando conferência."}, status_code=409)
     return _disparar_emissao(db, em, "salvar")
+
+
+@app.post("/api/emissoes/{emissao_id}/cubagem", dependencies=[Depends(require_emissao_api)])
+def api_emissoes_cubagem(emissao_id: int, payload: dict, db: Session = Depends(get_db)):
+    """Frete por peso/cubagem e a nota sem os m³: com a cubagem informada, o
+    bot prepara de novo e o GW calcula o frete pela tabela."""
+    try:
+        m3 = round(float(str(payload.get("cubagem") or "").replace(",", ".")), 4)
+    except ValueError:
+        m3 = 0
+    if m3 <= 0:
+        return JSONResponse({"erro": "Informe a cubagem em m³ (ex.: 1,25)."}, status_code=400)
+    em = _mudar_status(db, emissao_id, ("conferir",),
+                       {"status": "preparando", "cubagem": m3, "frete_calculado": None, "total_prestacao": None})
+    if not em:
+        return JSONResponse({"erro": "Esse pedido não está mais aguardando conferência."}, status_code=409)
+    return _disparar_emissao(db, em, "preparar")
 
 
 @app.post("/api/emissoes/{emissao_id}/cancelar", dependencies=[Depends(require_emissao_api)])

@@ -523,3 +523,9 @@ tr.usr-inativo td { color: var(--text-muted); }
 .lt-acoes { margin-bottom: 10px; }
 .lt-acoes .btn-primary { margin-top: 0; }
 #lt-recusadas { margin-top: 8px; }
+.lt-xml { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lt-xml .btn { font-size: 13px; padding: 7px 12px; }
+#lt-xml-status:empty { display: none; }
+#lt-xml-status { line-height: 1.5; }
+.lt-cub { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lt-cub input[type="text"] { width: 72px; min-width: 0; text-align: right; padding: 4px 7px; }

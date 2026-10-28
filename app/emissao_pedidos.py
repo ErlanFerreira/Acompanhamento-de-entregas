@@ -48,6 +48,7 @@ def _resumo(r) -> dict:
         "tomador": r.tomador,
         "origem_frete": r.origem_frete,
         "observacao": r.observacao,
+        "precisa_cubagem": r.precisa_cubagem,
     }
 
 
@@ -84,6 +85,7 @@ def preparar(db, em: EmissaoCte, sessao: Optional[SessaoGW] = None, simular: boo
             solicitante=em.solicitante,
             simular=simular or not direto,
             sessao=sessao,
+            cubagem=em.cubagem,
         )
     except _VariosCtes as e:
         em.opcoes = json.dumps([asdict(c) for c in e.achados], ensure_ascii=False)
@@ -135,6 +137,7 @@ def salvar(db, em: EmissaoCte, sessao: Optional[SessaoGW] = None, simular: bool 
         solicitante=em.solicitante,
         simular=simular,
         sessao=sessao,
+        cubagem=em.cubagem,
     )
     em.mensagens = json.dumps(r.mensagens, ensure_ascii=False)
     em.total_prestacao = r.total_prestacao

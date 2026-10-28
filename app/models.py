@@ -310,6 +310,9 @@ class EmissaoCte(Base):
     # robô daquele PC pegou) ou "github" (workflow, com o robô desligado).
     executor = Column(String(60), nullable=True)
     lote = Column(String(20), nullable=True, index=True)  # pedidos enviados juntos
+    # m³ da carga, quando o frete do tomador é por cubagem e a nota não traz
+    # (informado na tela; o GW calcula o frete com ele).
+    cubagem = Column(Float, nullable=True)
 
 
 class EmissaoRobo(Base):
