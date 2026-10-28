@@ -68,6 +68,10 @@ def coletar(db: Session, usuario: Usuario) -> dict | None:
     fora = base.filter(Carga.status == "FPE").count()
     # pendentes separados pelo manifesto/romaneio: parados no depósito x em rota
     em_deposito = base.filter(historico.cond_em_deposito()).count()
+    # parados há mais de 5 dias (dias desde a emissão do CT-e: o relatório do GW
+    # não traz a data em que a carga chegou ao depósito)
+    limite_parado = (historico.hoje_brasilia() - datetime.timedelta(days=5)).isoformat()
+    parados_5d = base.filter(historico.cond_em_deposito(), Carga.emissao < limite_parado).count()
     em_rota = base.filter(historico.cond_em_rota()).count()
 
     atrasados = (
@@ -102,7 +106,7 @@ def coletar(db: Session, usuario: Usuario) -> dict | None:
     entregues = no_prazo + fora
     return {
         "pendentes": pendentes, "vencidos": vencidos, "maior_atraso": maior_atraso,
-        "em_deposito": em_deposito, "em_rota": em_rota,
+        "em_deposito": em_deposito, "em_rota": em_rota, "parados_5d": parados_5d,
         "pct_no_prazo": (no_prazo / entregues) if entregues else None, "entregues_fora": fora,
         "atrasados": [
             {
@@ -149,7 +153,8 @@ def renderizar(usuario: Usuario, dados: dict, hoje: datetime.date) -> tuple[str,
         f"- Pendentes de entrega: {dados['pendentes']}{_texto_variacao(var, 'pendentes')}",
         f"- Com prazo vencido: {dados['vencidos']}{_texto_variacao(var, 'vencidos')}",
     ]
-    linhas.append(f"  - parados no depósito (sem manifesto/romaneio da matriz): {dados['em_deposito']}")
+    linhas.append(f"  - parados no depósito (sem manifesto/romaneio da matriz): {dados['em_deposito']}"
+                  + (f", {dados['parados_5d']} há mais de 5 dias" if dados["parados_5d"] else ""))
     linhas.append(f"  - em rota de entrega (manifesto/romaneio da matriz): {dados['em_rota']}")
     if dados["maior_atraso"]:
         linhas.append(f"- Maior atraso: {dados['maior_atraso']} dia(s)")
@@ -183,7 +188,8 @@ def renderizar(usuario: Usuario, dados: dict, hoje: datetime.date) -> tuple[str,
         cards.append(card("Entregues no prazo", f"{dados['pct_no_prazo'] * 100:.1f}%".replace(".", ","), f"{dados['entregues_fora']} fora do prazo", "#1a9d3a"))
 
     cards_logistica = [
-        card("Parados no depósito", str(dados["em_deposito"]), "sem manifesto/romaneio da matriz", "#eb6834"),
+        card("Parados no depósito", str(dados["em_deposito"]),
+             "sem manifesto/romaneio da matriz" + (f" · {dados['parados_5d']} há mais de 5 dias" if dados["parados_5d"] else ""), "#eb6834"),
         card("Em rota de entrega", str(dados["em_rota"]), "manifesto/romaneio da matriz, até a baixa", "#2a78d6"),
     ]
 

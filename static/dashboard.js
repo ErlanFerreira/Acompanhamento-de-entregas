@@ -260,9 +260,10 @@
       const deposito = rows.filter(emDeposito).length;
       const rota = rows.filter(emRota).length;
       pintarTiles("kpis-logistica", [
-        { k: "deposito", label: "Em depósito (parados)", value: fmtN(deposito), sub: pendentes ? fmtPct(deposito / pendentes) + " das pendentes · sem manifesto/romaneio da matriz" : "sem manifesto/romaneio da matriz", cls: "deposito" },
+        { k: "deposito", label: "Em depósito (parados)", value: fmtN(deposito), sub: (pendentes ? fmtPct(deposito / pendentes) + " das pendentes · " : "") + "sem manifesto/romaneio da matriz" + (deposito ? " · mais antigo: " + Math.max.apply(null, rows.filter(emDeposito).map(r => diasParado(r) || 0)) + " dias" : ""), cls: "deposito" },
         { k: "em_rota", label: "Em rota de entrega", value: fmtN(rota), sub: pendentes ? fmtPct(rota / pendentes) + " das pendentes · manifesto/romaneio da matriz, até a baixa" : "manifesto/romaneio da matriz, até a baixa", cls: "rota" }
       ]);
+      pintarFaixasParado(rows);
     }
 
     function pintarTiles(elementoId, tiles) {
@@ -281,6 +282,48 @@
     // fica no servidor (app/logistica.py) e vem pronta em r.logistica.
     function emRota(r) { return r.logistica === "rota"; }
     function emDeposito(r) { return r.logistica === "deposito"; }
+
+    // "Parado há": dias desde a emissão do CT-e. O relatório do GW não traz a
+    // data em que a carga chegou ao depósito, então a emissão é o relógio.
+    const FAIXAS_PARADO = [
+      { k: "ate2", rotulo: "Até 2 dias", min: 0, max: 2, cor: "var(--status-good)" },
+      { k: "d3a5", rotulo: "3 a 5 dias", min: 3, max: 5, cor: "var(--status-warning)" },
+      { k: "d6a10", rotulo: "6 a 10 dias", min: 6, max: 10, cor: "var(--status-serious)" },
+      { k: "mais10", rotulo: "Mais de 10 dias", min: 11, max: Infinity, cor: "var(--status-critical)" }
+    ];
+    function diasParado(r) {
+      if (!r.emissao) return null;
+      return Math.max(Math.round((REF_DATE - new Date(r.emissao + "T00:00:00")) / 86400000), 0);
+    }
+    function faixaDe(dias) {
+      return dias == null ? null : FAIXAS_PARADO.find(f => dias >= f.min && dias <= f.max) || null;
+    }
+    function faixaParado(r) { const f = faixaDe(diasParado(r)); return f ? f.k : null; }
+    function pillParado(r) {
+      const d = diasParado(r), f = faixaDe(d);
+      if (d == null || !f) return "—";
+      return '<span class="status-pill" title="Dias desde a emissão do CT-e, sem manifesto/romaneio da matriz" ' +
+        'style="background:color-mix(in srgb, ' + f.cor + ' 16%, transparent); color:' + f.cor + ';">' +
+        '<span class="d" style="background:' + f.cor + '"></span>' + d + (d === 1 ? " dia" : " dias") + '</span>';
+    }
+
+    // Faixas de tempo parado no depósito (cartões que abrem a lista da faixa).
+    function pintarFaixasParado(rows) {
+      const el = document.getElementById("parados-faixas");
+      if (!el) return;
+      const parados = rows.filter(emDeposito);
+      const total = parados.length;
+      el.innerHTML = FAIXAS_PARADO.map(f => {
+        const n = parados.filter(r => faixaParado(r) === f.k).length;
+        return '<button type="button" class="comp-prazo-tile" data-faixa="' + f.k + '" style="--cor:' + f.cor + '" title="Ver os CT-e">' +
+          '<div class="label"><span class="d"></span>' + esc(f.rotulo) + '</div>' +
+          '<div class="value">' + fmtN(n) + '</div>' +
+          '<div class="sub">' + (total ? fmtPct(n / total) + " dos parados" : "—") + '</div></button>';
+      }).join("");
+      el.querySelectorAll("[data-faixa]").forEach(b => b.addEventListener("click", () => {
+        location.hash = "lista/deposito/parado/" + b.dataset.faixa;
+      }));
+    }
 
     // Aviso "Em rota" ao lado do status: saiu pra entrega (manifesto/romaneio da
     // matriz) e ainda não tem data de entrega.
@@ -313,18 +356,19 @@
     // "#lista/pendentes/tomador/<nome>" ou ".../cidade/<cidade/UF>".
     const FILTROS_LISTA = {
       tomador: { rotulo: "Tomador", chave: r => r.consignatario || "(sem tomador)" },
-      cidade: { rotulo: "Cidade de destino", chave: r => r.cidade_dest + "/" + r.uf_dest }
+      cidade: { rotulo: "Cidade de destino", chave: r => r.cidade_dest + "/" + r.uf_dest },
+      parado: { rotulo: "Parado há", chave: r => faixaParado(r), exibir: k => (FAIXAS_PARADO.find(f => f.k === k) || {}).rotulo || k }
     };
 
     function vistaAberta() {
-      const m = /^#lista\/(\w+)(?:\/(tomador|cidade)\/(.+))?$/.exec(location.hash);
+      const m = /^#lista\/(\w+)(?:\/(tomador|cidade|parado)\/(.+))?$/.exec(location.hash);
       if (!m || !GRUPOS[m[1]]) return null;
       const v = Object.assign({ chave: m[1] }, GRUPOS[m[1]]);
       if (m[2]) {
         let valor = m[3];
         try { valor = decodeURIComponent(valor); } catch (e) { /* mantém como veio */ }
         const f = FILTROS_LISTA[m[2]];
-        v.extra = { tipo: m[2], rotulo: f.rotulo, valor: valor, fn: r => f.chave(r) === valor };
+        v.extra = { tipo: m[2], rotulo: f.rotulo, valor: valor, texto: f.exibir ? f.exibir(valor) : valor, fn: r => f.chave(r) === valor };
       }
       return v;
     }
@@ -363,6 +407,8 @@
       if (fora) partes.push(fmtN(fora) + " fora do prazo");
       const atraso = rows.reduce((m, r) => Math.max(m, r.dias_atraso || 0), 0);
       if (atraso > 0) partes.push("maior atraso: " + fmtN(atraso) + (atraso === 1 ? " dia" : " dias"));
+      const parados = rows.filter(emDeposito);
+      if (parados.length) partes.push("parado mais antigo: " + Math.max.apply(null, parados.map(r => diasParado(r) || 0)) + " dias");
       if (!partes.length) partes.push("emissão mais antiga: " + fmtDate(rows.reduce((m, r) => (!m || (r.emissao && r.emissao < m) ? r.emissao : m), "")));
       return partes.join(" · ");
     }
@@ -376,7 +422,7 @@
 
       document.getElementById("vl-titulo").innerHTML =
         '<span class="comp-vp-dot" style="background:' + v.cor + '"></span>' + esc(v.rotulo) +
-        (v.extra ? ' <span class="comp-de" style="font-weight:500;">· ' + esc(v.extra.rotulo) + ': ' + esc(v.extra.valor) + '</span>' : "");
+        (v.extra ? ' <span class="comp-de" style="font-weight:500;">· ' + esc(v.extra.rotulo) + ': ' + esc(v.extra.texto) + '</span>' : "");
       document.getElementById("vl-abas").innerHTML = Object.keys(GRUPOS).map(k =>
         '<a href="' + esc(hrefLista(k, v)) + '" class="comp-vp-aba' + (k === v.chave ? " ativa" : "") + '" style="--cor:' + GRUPOS[k].cor + '">' +
         '<span class="d"></span>' + esc(GRUPOS[k].rotulo) + ' <strong>' + fmtN(recorte.filter(GRUPOS[k].filtro).length) + '</strong></a>'
@@ -431,7 +477,7 @@
         const rows = ordem[parseInt(det.dataset.i, 10)][1];
         corpo.innerHTML =
           '<div class="comp-pend-scroll comp-vp-scroll"><table class="detail comp-pend-table"><thead><tr>' +
-          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Status</th><th>Dias</th><th>Última ocorrência</th><th>Manif.</th><th>Cidade do manifesto</th><th>Roman.</th>' +
+          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Status</th><th>Dias</th><th>Parado há</th><th>Última ocorrência</th><th>Manif.</th><th>Cidade do manifesto</th><th>Roman.</th>' +
           '</tr></thead><tbody>' + rows.map(r => {
             const diasStr = r.dias_atraso == null ? "—" : (r.dias_atraso > 0 ? "+" + r.dias_atraso : r.dias_atraso);
             return '<tr>' +
@@ -443,6 +489,7 @@
               '<td>' + fmtDate(r.data_baixa) + '</td>' +
               '<td><span class="status-pill" style="background:color-mix(in srgb, ' + STATUS_COLOR[r.estado] + ' 16%, transparent); color:' + STATUS_COLOR[r.estado] + ';"><span class="d" style="background:' + STATUS_COLOR[r.estado] + '"></span>' + esc(STATUS_SHORT[r.estado]) + '</span>' + pillRota(r) + '</td>' +
               '<td class="num">' + diasStr + '</td>' +
+              '<td>' + (emDeposito(r) ? pillParado(r) : "—") + '</td>' +
               '<td title="' + esc(r.ocorrencia || "") + '">' + esc(truncate(r.ocorrencia || "—", 30)) + '</td>' +
               '<td class="' + (r.manifesto ? "flag-yes" : "flag-no") + '">' + (r.manifesto ? "Sim" : "Não") + '</td>' +
               '<td>' + (r.manifesto ? esc(r.cidade_manifesto || "—") : "—") + '</td>' +
@@ -478,12 +525,13 @@
     document.getElementById("vl-export").addEventListener("click", () => {
       const v = vistaAberta();
       if (!v) return;
-      const lines = [["Tomador", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio"].join(";")];
+      const lines = [["Tomador", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio", "Situacao logistica", "Parado ha (dias)"].join(";")];
       vlLinhas.forEach(r => {
         lines.push([
           csvSafe(r.consignatario || ""), r.cte, r.serie || "", csvSafe(r.notas_fiscais || ""), r.emissao || "", csvSafe(r.destinatario || ""),
           csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "", STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso,
-          r.previsao || "", csvSafe(r.ocorrencia || ""), r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao"
+          r.previsao || "", csvSafe(r.ocorrencia || ""), r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao",
+          emRota(r) ? "Em rota" : emDeposito(r) ? "Em deposito" : "", emDeposito(r) && diasParado(r) != null ? diasParado(r) : ""
         ].join(";"));
       });
       const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
