@@ -19,9 +19,6 @@
       {% endif %}
       <a href="/consultas" class="nav-link {{ 'active' if active == 'consultas' else '' }}">Consulta de Notas</a>
       <a href="/bipagem" class="nav-link {{ 'active' if active == 'bipagem' else '' }}">Emissão de Protocolo</a>
-      {% if pode_emitir_cte(request) %}
-      <a href="/emissao" class="nav-link {{ 'active' if active == 'emissao' else '' }}">Emissão de CT-e</a>
-      {% endif %}
       {% if eh_supervisor(request) %}
       <a href="/usuarios" class="nav-link {{ 'active' if active == 'usuarios' else '' }}">Usuários</a>
       {% endif %}
