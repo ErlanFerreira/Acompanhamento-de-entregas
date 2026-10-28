@@ -282,7 +282,10 @@
   }
 
   function reagir(em) {
-    if (em.status === "preparando") return esperar(em, "Procurando no GW o CT-e dessa nota…");
+    if (em.status === "preparando") {
+      const daNota = (TIPO[em.tipo] || {}).da_nota;
+      return esperar(em, daNota ? "Importando a nota no GW e calculando o frete…" : "Procurando no GW o CT-e dessa nota…");
+    }
     if (em.status === "salvando") return esperar(em, "Salvando o CT-e no GW…");
     if (em.status === "escolher") return perguntarOriginal(em);
     if (em.status === "conferir") return mostrarAchado(em);
@@ -346,17 +349,27 @@
   function mostrarAchado(em) {
     passo(3);
     const r = em.resumo || {};
-    const nota = em.tipo === "devolucao" ? '<div class="cv-dica">Como é devolução, o GW já inverteu remetente e destinatário.</div>' : "";
-    bot("Achei! É o CT-e <b>" + esc(r.cte_original) + "</b> de " + esc(r.emissao_original) + " (" + moeda(r.total_original) + "):" +
-      fichaHtml([["Remetente", esc(r.remetente)], ["Destinatário", esc(r.destinatario)], ["Quem paga", esc(r.tomador)]]) + nota);
+    const NOTAS = {
+      devolucao: "Como é devolução, o GW já inverteu remetente e destinatário.",
+      cortesia: "Cortesia não entra no contas a receber.",
+    };
+    const nota = NOTAS[em.tipo] ? '<div class="cv-dica">' + NOTAS[em.tipo] + "</div>" : "";
+    const ficha = fichaHtml([["Remetente", esc(r.remetente)], ["Destinatário", esc(r.destinatario)], ["Quem paga", esc(r.tomador)]]);
+    if (r.cte_original) {
+      bot("Achei! É o CT-e <b>" + esc(r.cte_original) + "</b> de " + esc(r.emissao_original) + " (" + moeda(r.total_original) + "):" + ficha + nota);
+    } else {
+      bot("Pronto, importei a <b>NF " + esc(nf(em.chave_nfe)) + "</b> no GW:" + ficha + nota);
+    }
     perguntarFrete(em);
   }
 
   function perguntarFrete(em) {
     const r = em.resumo || {};
     if (em.frete_calculado != null) {
-      const m = bot("Pela tabela do cliente, o frete fica <b>" + moeda(em.frete_calculado) + "</b> <span class=\"cv-sutil\">— " +
-        esc(r.origem_frete) + "</span>. Posso usar esse valor?");
+      // "tabela de preço do tomador" sozinho só repetiria a frase.
+      const detalhe = r.origem_frete && r.origem_frete !== "tabela de preço do tomador"
+        ? ' <span class="cv-sutil">— ' + esc(r.origem_frete) + "</span>" : "";
+      const m = bot("Pela tabela do cliente, o frete fica <b>" + moeda(em.frete_calculado) + "</b>" + detalhe + ". Posso usar esse valor?");
       opcoes(m.area, [
         { rotulo: "Sim, usar " + moeda(em.frete_calculado), classe: "btn-primary", acao: () => confirmarSalvar(em, em.frete_calculado) },
         { rotulo: "Informar outro valor", acao: () => perguntarValor(em, "Qual o valor do frete?") },
@@ -399,7 +412,7 @@
     const m = bot("Tudo certo! Confira o resumo antes de salvar:" + fichaHtml([
       ["Tipo", t.icone + " " + esc(t.rotulo)],
       ["Nota fiscal", "NF " + esc(nf(em.chave_nfe))],
-      ["CT-e original", esc(r.cte_original) + " de " + esc(r.emissao_original)],
+      ["CT-e original", r.cte_original ? esc(r.cte_original) + " de " + esc(r.emissao_original) : ""],
       ["Trajeto", esc(r.remetente) + " → " + esc(r.destinatario)],
       ["Quem paga", esc(r.tomador)],
       ["Frete", "<b>" + moeda(frete) + "</b>"],

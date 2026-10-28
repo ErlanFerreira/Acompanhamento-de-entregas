@@ -23,7 +23,7 @@ from dataclasses import asdict
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db import SessionLocal  # noqa: E402
-from app.emissao_cte import EmissaoError, emitir  # noqa: E402
+from app.emissao_cte import TIPOS, TIPOS_DA_NOTA, EmissaoError, emitir  # noqa: E402
 from app.models import EmissaoCte  # noqa: E402
 
 
@@ -37,14 +37,14 @@ def _escolher(achados):
 
 
 def _resumo(r) -> dict:
-    o = r.original
+    o = r.original  # None em Normal/Cortesia (vêm da nota, sem CT-e original)
     return {
         "tipo": r.tipo,
         "numero_ct": r.numero_ct,
-        "cte_original": o.numero,
-        "serie_original": o.serie,
-        "emissao_original": o.emissao,
-        "total_original": o.total,
+        "cte_original": o.numero if o else None,
+        "serie_original": o.serie if o else None,
+        "emissao_original": o.emissao if o else None,
+        "total_original": o.total if o else None,
         "remetente": r.remetente,
         "destinatario": r.destinatario,
         "tomador": r.tomador,
@@ -72,7 +72,7 @@ def preparar(db, em: EmissaoCte) -> None:
         print(f"Emissão {em.id}: NF em {len(e.achados)} CT-e -- aguardando escolha.")
         return
 
-    em.cte_original_id = r.original.id
+    em.cte_original_id = r.original.id if r.original else None
     em.resumo = json.dumps(_resumo(r), ensure_ascii=False)
     em.frete_calculado = None if r.frete_pendente else r.frete
     em.total_prestacao = None if r.frete_pendente else r.total_prestacao
@@ -84,12 +84,14 @@ def preparar(db, em: EmissaoCte) -> None:
 
 
 def salvar(db, em: EmissaoCte) -> None:
-    if not em.cte_original_id or not em.frete_final:
+    da_nota = TIPOS[em.tipo][0] in TIPOS_DA_NOTA
+    if (not da_nota and not em.cte_original_id) or not em.frete_final:
         raise EmissaoError("Pedido sem CT-e original ou frete confirmado -- refaça pela tela.")
 
     def confirmar(r) -> bool:
         # Confere que o GW montou o mesmo lançamento que o supervisor viu.
-        return r.original.id == em.cte_original_id and abs(r.frete - em.frete_final) < 0.005
+        mesmo_original = (r.original.id if r.original else None) == em.cte_original_id
+        return mesmo_original and abs(r.frete - em.frete_final) < 0.005
 
     r = emitir(
         em.tipo, em.chave_nfe,

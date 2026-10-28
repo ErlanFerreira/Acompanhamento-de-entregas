@@ -1,6 +1,6 @@
-"""Emissão de CT-e derivado (diária, reentrega, devolução, descarga,
-complementar, substituição) no portal Webtrans (GW Sistemas), a partir da
-chave da NF-e.
+"""Emissão de CT-e no portal Webtrans (GW Sistemas) a partir da chave da
+NF-e: normal, cortesia e os derivados de um CT-e já emitido (diária,
+reentrega, devolução, descarga, coleta/pallets, complementar, substituição).
 
 Faz exatamente o que o usuário faria na tela "Conhecimentos > Novo cadastro"
 (`frameset_conhecimento`):
@@ -12,6 +12,10 @@ Faz exatamente o que o usuário faria na tela "Conhecimentos > Novo cadastro"
    "Chave Acesso NF-e";
 3. escolhe o CT-e original -- o próprio GW copia remetente, destinatário,
    tomador, notas e calcula o frete (`retornapai` do popup);
+   Normal e Cortesia não têm CT-e original: em vez do passo 2-3, importa a
+   nota pelo "Importar XML/DANFE" do próprio GW (chave da NF-e, procurando
+   no banco do GW e no servidor DF-e -- nunca na consulta pública, que pede
+   captcha), e o GW preenche participantes e calcula o frete pela tabela;
 4. confere o frete e SALVA sem transmitir (o botão "Salvar [F8]", nunca o
    "Salvar e Transmitir") -- a transmissão à SEFAZ fica com o usuário.
 
@@ -20,8 +24,16 @@ De onde vem o frete (regra do próprio popup do GW):
   da tabela de preço do cliente, respeitando o frete mínimo. Sem tabela ou
   com o % zerado, o GW não tem o valor -> pergunta ao usuário.
 - Substituição: o mesmo valor do CT-e original.
-- Diária/Descarga/Complementar: a tabela não tem valor próprio pra isso (o
-  GW só repete o total do original) -> pergunta ao usuário.
+- Diária/Descarga/Complementar/Coleta-Pallets: a tabela não tem valor
+  próprio pra isso (o GW só repete o total do original -- ou, em
+  Coleta/Pallets, aplica o % de devolução) -> pergunta ao usuário.
+- Normal/Cortesia: a tabela de preço do tomador, calculada pelo GW ao
+  importar a nota. Sem tabela -> pergunta ao usuário.
+
+"Frete" aqui é a soma da composição (frete peso, frete valor, despacho,
+GRIS, pedágio...), sem os impostos. Quando o usuário informa outro valor, a
+composição é zerada e o valor todo vai em "Frete Valor" (como o próprio GW
+faz nos CT-e derivados).
 
 As interações (escolher entre vários CT-e, informar frete, responder a
 confirmações do GW, confirmar antes de salvar) ficam a cargo de quem chama,
@@ -29,6 +41,7 @@ via callbacks -- ver `scripts/emitir_cte.py`.
 """
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -36,7 +49,7 @@ from playwright.sync_api import Dialog, Frame, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from . import scrape
-from .tipos_cte import TIPOS, EmissaoError, validar_chave_nfe  # noqa: F401 (reexportados pro CLI)
+from .tipos_cte import TIPOS, TIPOS_DA_NOTA, EmissaoError, validar_chave_nfe  # noqa: F401 (reexportados pro CLI)
 
 logger = logging.getLogger("emissao_cte")
 
@@ -45,6 +58,10 @@ CADASTRO_URL = f"{scrape.PORTAL_URL}/frameset_conhecimento?acao=iniciar"
 # Campo escondido de cada linha do popup com o % da tabela do cliente que o
 # GW aplica sobre o total do CT-e original.
 _CAMPO_PERCENTUAL = {"r": "valorReentrega", "d": "valorDevolucao"}
+
+# Campos da "Composição do Frete" (somados; o desconto é subtraído).
+_COMPOSICAO = ("valor_taxa_fixa", "valor_itr", "valor_peso", "valor_frete", "valor_despacho", "valor_ademe",
+               "valor_outros", "valor_gris", "valor_pedagio", "valor_sec_cat")
 
 
 @dataclass
@@ -67,7 +84,7 @@ class CteOriginal:
 @dataclass
 class Resultado:
     tipo: str
-    original: CteOriginal
+    original: Optional[CteOriginal]  # None em Normal/Cortesia (vêm da nota)
     numero_ct: str
     remetente: str
     destinatario: str
@@ -83,9 +100,10 @@ class Resultado:
 
 def _num(v) -> float:
     try:
-        return float(str(v).replace(",", "."))
+        n = float(str(v).replace(",", "."))
     except (TypeError, ValueError):
         return 0.0
+    return n if math.isfinite(n) else 0.0
 
 
 def _fmt_moeda(v: float) -> str:
@@ -191,15 +209,23 @@ def _ler_resultados(popup: Page) -> list[CteOriginal]:
 
 def _ler_formulario(frame: Frame) -> dict:
     return frame.evaluate(
-        """() => {
+        """(composicao) => {
             const v = (id) => (document.getElementById(id) || {}).value || '';
+            const n = (id) => parseFloat(v(id).replace(',', '.')) || 0;
+            // Laço comum: a tela do GW usa o Prototype.js, que troca o
+            // Array.prototype.reduce por um que não soma (dava NaN).
+            let soma = -n('valor_desconto');
+            for (const id of composicao) soma += n(id);
             return {
                 numero_ct: v('nfiscal'), remetente: v('rem_rzs'), destinatario: v('dest_rzs'),
                 tomador: v('con_rzs'), valor_frete: v('valor_frete'), total: v('total'),
                 id_original: v('id_dev_reen'), id_conhecimento: v('idConhecimento'),
                 observacao: [1, 2, 3, 4, 5].map(i => v('obs_lin' + i)).filter(Boolean).join(' | '),
+                tabela_id: v('client_tariff_id'),
+                composicao: soma,
             };
-        }"""
+        }""",
+        list(_COMPOSICAO),
     )
 
 
@@ -239,16 +265,117 @@ def _frete_da_tabela(tipo: str, original: CteOriginal, valor_frete_gw: float) ->
 
 
 def _aplicar_frete(frame: Frame, valor: float) -> None:
-    # O popup já zera a composição do frete e deixa o valor todo em "Frete
-    # Valor" -- só troca esse campo e recalcula o total (ICMS etc.).
+    # Mesmo que o popup do GW faz nos CT-e derivados: zera a composição e
+    # deixa o valor todo em "Frete Valor"; depois recalcula o total (ICMS etc.).
     frame.evaluate(
-        """(valor) => {
+        """([valor, campos]) => {
+            for (const id of campos.concat(['valor_desconto'])) {
+                const c = document.getElementById(id);
+                if (c) c.value = '0.00';
+            }
             document.getElementById('valor_frete').value = valor;
             recalcular(false);
         }""",
-        _fmt_moeda(valor),
+        [_fmt_moeda(valor), list(_COMPOSICAO)],
     )
     frame.wait_for_timeout(500)
+
+
+def _carregar_original(context, frame: Frame, chave: str, rotulo_tipo: str, cte_id: Optional[str],
+                       escolher_cte: Callable[[list[CteOriginal]], Optional[CteOriginal]]) -> CteOriginal:
+    """Passos 2-3: acha o CT-e original pela chave da NF no popup do GW e
+    deixa o GW copiar os dados dele pro lançamento novo."""
+    with context.expect_page(timeout=30_000) as info:
+        frame.click("#localiza_ctrc")
+    popup = info.value
+    popup.wait_for_load_state("networkidle")
+    _pesquisar_por_chave(popup, chave)
+
+    achados = _ler_resultados(popup)
+    if not achados:
+        raise EmissaoError(
+            f"Nenhum CT-e do GW tem a NF-e {chave} (em todas as filiais) disponível para {rotulo_tipo}. "
+            "Confira a chave -- ou se o CT-e original já foi substituído/cancelado."
+        )
+    if cte_id:
+        original = next((c for c in achados if c.id == str(cte_id)), None)
+        if original is None:
+            raise EmissaoError(
+                "O CT-e escolhido não aparece mais na busca do GW para essa NF "
+                "(pode ter sido substituído ou cancelado nesse meio tempo)."
+            )
+    else:
+        original = achados[0] if len(achados) == 1 else escolher_cte(achados)
+    if original is None:
+        raise EmissaoError("Nenhum CT-e escolhido -- emissão cancelada.")
+
+    popup.click(f"div.linkEditar[onclick*='retornapai({original.id})']")
+    try:
+        popup.wait_for_event("close", timeout=90_000)
+    except PlaywrightTimeoutError:
+        scrape._salvar_debug(popup, "emissao_cte_popup")
+        raise EmissaoError("O GW não terminou de carregar os dados do CT-e original (popup não fechou).")
+    frame.wait_for_timeout(2000)
+    return original
+
+
+def _importar_nota(context, frame: Frame, chave: str) -> dict:
+    """Normal/Cortesia: "Importar XML/DANFE" do GW com a chave da NF-e. O GW
+    procura a nota no banco dele e, se não tiver, no servidor DF-e; a consulta
+    pública fica desligada (pede captcha). Só preenche a tela -- não grava
+    nada (conferido: o próximo número de CT-e não muda)."""
+    with context.expect_page(timeout=30_000) as info:
+        frame.click("#bt_import")
+    popup = info.value
+    popup.wait_for_load_state("networkidle")
+    popup.wait_for_selector("#chaveAcessoNFe_0", timeout=30_000)
+    popup.evaluate("""() => {
+        document.getElementById('consultarNoServidorDFe').checked = true;
+        document.getElementById('consultaPublica').checked = false;
+        const api = document.getElementById('consultarNaApi');
+        if (api) api.checked = false;
+    }""")
+    popup.fill("#chaveAcessoNFe_0", chave)
+    popup.click("#consultarChaveAcesso_0")
+    try:
+        popup.wait_for_selector("#removerChaveAcesso_0", state="visible", timeout=90_000)
+    except PlaywrightTimeoutError:
+        scrape._salvar_debug(popup, "emissao_cte_importar")
+        raise EmissaoError(
+            f"O GW não encontrou a NF-e {chave} (nem no banco dele, nem no servidor DF-e). "
+            "Confira a chave -- ou importe o XML da nota no GW e peça de novo."
+        )
+    popup.click("#btVisualizar")
+    # O GW importa e preenche a tela de cadastro (remetente, notas, frete).
+    frame.wait_for_function("() => (document.getElementById('rem_rzs') || {}).value", timeout=120_000)
+    try:
+        popup.wait_for_event("close", timeout=30_000)
+    except PlaywrightTimeoutError:
+        pass
+    frame.wait_for_timeout(3000)
+    return _ler_formulario(frame)
+
+
+def _frete_da_nota(dados: dict, valor_gw: float, mensagens: list[str]) -> tuple[Optional[float], str]:
+    """Normal/Cortesia: o GW calcula pela tabela do tomador ao importar."""
+    sem_tabela = any("não possui tabela de preço" in m for m in mensagens)
+    if sem_tabela or int(_num(dados.get("tabela_id"))) <= 0:
+        return None, "o tomador não tem tabela de preço no GW"
+    if valor_gw <= 0:
+        return None, "a tabela de preço do tomador não calculou o frete dessa nota"
+    return valor_gw, "tabela de preço do tomador"
+
+
+def _corrigir_obs_pallets(frame: Frame, numero_original: str) -> None:
+    # O popup do GW trata Coleta/Pallets como devolução na observação
+    # ("Devolução do CTRC: ...") -- corrige o texto.
+    frame.evaluate(
+        """(texto) => {
+            const c = document.getElementById('obs_lin1');
+            if (c && /^Devolu/.test(c.value)) c.value = texto;
+        }""",
+        f"Coleta/Pallets do CTRC: {numero_original}",
+    )
 
 
 def _salvar(page: Page, frame: Frame, dialogos: _Dialogos) -> bool:
@@ -339,50 +466,28 @@ def emitir(
             frame.select_option("#tipoConhecimento", valor_tipo)
             frame.wait_for_timeout(800)
 
-            with context.expect_page(timeout=30_000) as info:
-                frame.click("#localiza_ctrc")
-            popup = info.value
-            popup.wait_for_load_state("networkidle")
-            _pesquisar_por_chave(popup, chave)
-
-            achados = _ler_resultados(popup)
-            if not achados:
-                raise EmissaoError(
-                    f"Nenhum CT-e do GW tem a NF-e {chave} (em todas as filiais) disponível para {rotulo_tipo}. "
-                    "Confira a chave -- ou se o CT-e original já foi substituído/cancelado."
-                )
-            if cte_id:
-                original = next((c for c in achados if c.id == str(cte_id)), None)
-                if original is None:
-                    raise EmissaoError(
-                        "O CT-e escolhido não aparece mais na busca do GW para essa NF "
-                        "(pode ter sido substituído ou cancelado nesse meio tempo)."
-                    )
+            if valor_tipo in TIPOS_DA_NOTA:
+                original = None
+                dados = _importar_nota(context, frame, chave)
             else:
-                original = achados[0] if len(achados) == 1 else escolher_cte(achados)
-            if original is None:
-                raise EmissaoError("Nenhum CT-e escolhido -- emissão cancelada.")
+                original = _carregar_original(context, frame, chave, rotulo_tipo, cte_id, escolher_cte)
+                page.wait_for_load_state("networkidle")
+                dados = _ler_formulario(frame)
+                if dados["id_original"] != original.id:
+                    scrape._salvar_debug(page, "emissao_cte")
+                    raise EmissaoError(f"O GW não vinculou o CT-e original {original.numero} ao novo lançamento.")
+                if valor_tipo == "p":
+                    _corrigir_obs_pallets(frame, original.numero)
 
-            popup.click(f"div.linkEditar[onclick*='retornapai({original.id})']")
-            try:
-                popup.wait_for_event("close", timeout=90_000)
-            except PlaywrightTimeoutError:
-                scrape._salvar_debug(popup, "emissao_cte_popup")
-                raise EmissaoError("O GW não terminou de carregar os dados do CT-e original (popup não fechou).")
-            frame.wait_for_timeout(2000)
-            page.wait_for_load_state("networkidle")
-
-            dados = _ler_formulario(frame)
-            if dados["id_original"] != original.id:
-                scrape._salvar_debug(page, "emissao_cte")
-                raise EmissaoError(f"O GW não vinculou o CT-e original {original.numero} ao novo lançamento.")
-
-            valor_gw = _num(dados["valor_frete"])
+            valor_gw = round(_num(dados["composicao"]), 2)
             frete_pendente = False
             if frete_manual is not None:
                 frete, origem = frete_manual, "informado pelo usuário"
             else:
-                frete, origem = _frete_da_tabela(valor_tipo, original, valor_gw)
+                if original is None:
+                    frete, origem = _frete_da_nota(dados, valor_gw, dialogos.mensagens)
+                else:
+                    frete, origem = _frete_da_tabela(valor_tipo, original, valor_gw)
                 if frete is None:
                     frete = informar_frete(origem)
                     if frete is None:
@@ -404,7 +509,7 @@ def emitir(
                 remetente=dados["remetente"],
                 destinatario=dados["destinatario"],
                 tomador=dados["tomador"],
-                frete=0.0 if frete_pendente else _num(dados["valor_frete"]),
+                frete=0.0 if frete_pendente else round(_num(dados["composicao"]), 2),
                 total_prestacao=0.0 if frete_pendente else _num(dados["total"]),
                 origem_frete=origem,
                 observacao=dados["observacao"],

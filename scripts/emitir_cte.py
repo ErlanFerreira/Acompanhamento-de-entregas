@@ -77,10 +77,12 @@ def perguntar(mensagem: str) -> bool:
 
 def _resumo(r: Resultado) -> str:
     o = r.original
+    origem = (f"{o.numero} série {o.serie} de {o.emissao} ({_moeda(o.total)})" if o
+              else "— (importado da nota fiscal)")
     return (
         f"\n  Tipo:            {r.tipo}\n"
         f"  Número CT:       {r.numero_ct}\n"
-        f"  CT-e original:   {o.numero} série {o.serie} de {o.emissao} ({_moeda(o.total)})\n"
+        f"  CT-e original:   {origem}\n"
         f"  Remetente:       {r.remetente}\n"
         f"  Destinatário:    {r.destinatario}\n"
         f"  Tomador:         {r.tomador}\n"

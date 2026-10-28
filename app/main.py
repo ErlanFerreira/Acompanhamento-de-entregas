@@ -694,7 +694,8 @@ def _disparar_emissao(db: Session, em: EmissaoCte, acao: str):
 def emissao_page(request: Request):
     analista = usuario_logado(request)
     tipos = [
-        {"valor": k, "rotulo": v[1], "icone": tipos_cte.EXPLICACOES[k][0], "explicacao": tipos_cte.EXPLICACOES[k][1]}
+        {"valor": k, "rotulo": v[1], "icone": tipos_cte.EXPLICACOES[k][0], "explicacao": tipos_cte.EXPLICACOES[k][1],
+         "da_nota": v[0] in tipos_cte.TIPOS_DA_NOTA}
         for k, v in tipos_cte.TIPOS.items()
     ]
     return templates.TemplateResponse("emissao.html", {

@@ -11,16 +11,25 @@ MODELO_NFE = "55"
 # nome usado no terminal/painel -> (valor do <select id="tipoConhecimento"> no GW, rótulo)
 # Na ordem em que aparecem na tela -- os mais pedidos primeiro.
 TIPOS = {
+    "normal": ("n", "Normal"),
     "reentrega": ("r", "Reentrega"),
     "devolucao": ("d", "Devolução"),
     "diaria": ("i", "Diárias"),
     "descarga": ("g", "Descarga"),
+    "coleta_pallets": ("p", "Coleta/Pallets"),
     "complementar": ("c", "Complementar"),
     "substituicao": ("s", "Substituição"),
+    "cortesia": ("b", "Cortesia"),
 }
+
+# Tipos que vêm direto da nota (importada no GW), sem CT-e original.
+TIPOS_DA_NOTA = {"n", "b"}
 
 # Pra tela de emissão do painel: ícone e explicação em linguagem do dia a dia.
 EXPLICACOES = {
+    "normal": ("🚚", "CT-e comum de uma nota que ainda não tem CT-e — o GW importa a nota e calcula o frete pela tabela."),
+    "coleta_pallets": ("🪵", "Cobrança da coleta ou devolução de pallets ligada a um CT-e já emitido."),
+    "cortesia": ("🎁", "Transporte sem cobrança — não entra no contas a receber. A nota é importada como no Normal."),
     "reentrega": ("🔁", "A entrega não deu certo e a mercadoria vai sair de novo para o mesmo destinatário."),
     "devolucao": ("↩️", "A mercadoria volta para o remetente — o GW inverte remetente e destinatário."),
     "diaria": ("⏱️", "Cobrança de diária do veículo que ficou parado esperando carregar ou descarregar."),

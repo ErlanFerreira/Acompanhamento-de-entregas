@@ -143,14 +143,17 @@ Actions (repositório privado tem 2000 minutos grátis/mês — a automação de
 navegador é mais pesada que uma chamada de API simples, mas 4 execuções/dia
 ainda ficam bem dentro do limite gratuito).
 
-## Bot de emissão de CT-e (diária, reentrega, devolução, descarga, complementar, substituição)
+## Bot de emissão de CT-e (normal, cortesia, reentrega, devolução, diária, descarga, coleta/pallets, complementar, substituição)
 
 Roda no seu PC, pelo terminal (`scripts/emitir_cte.py`, lógica em
 `app/emissao_cte.py`). Você informa o tipo e a chave da NF-e; o bot entra
 no GW, abre "Conhecimentos > Novo cadastro", escolhe o tipo e usa o próprio
 "Localizar conhecimento…" do GW (pesquisa por "Chave Acesso NF-e") para
 achar o CT-e original — o GW copia remetente, destinatário, tomador e notas.
-Se a NF estiver em mais de um CT-e, ele pergunta qual usar.
+Se a NF estiver em mais de um CT-e, ele pergunta qual usar. **Normal** e
+**Cortesia** não têm CT-e original: o bot importa a nota pelo "Importar
+XML/DANFE" do GW (procura no banco do GW e no servidor DF-e; a consulta
+pública fica de fora porque pede captcha).
 
 O frete segue a regra do próprio GW:
 
@@ -158,7 +161,8 @@ O frete segue a regra do próprio GW:
 |---|---|
 | Reentrega / Devolução | total do CT-e original × "% reentrega"/"% devolução" da tabela de preço do tomador (respeita o frete mínimo) |
 | Substituição | mesmo valor do CT-e original |
-| Diária / Descarga / Complementar | a tabela não tem esse valor — o bot pergunta |
+| Normal / Cortesia | tabela de preço do tomador, calculada pelo GW ao importar a nota |
+| Diária / Descarga / Coleta-Pallets / Complementar | a tabela não tem esse valor — o bot pergunta |
 
 Se o tomador não tiver tabela, ou o % estiver zerado, o bot também pergunta
 o valor. Antes de salvar mostra um resumo e pede confirmação. **Só salva —
