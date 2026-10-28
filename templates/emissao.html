@@ -10,7 +10,14 @@
     <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
   </header>
 
-  <section class="cv-card" aria-label="Assistente de emissão de CT-e">
+  <div class="cv-robo" id="cv-robo" role="status">Verificando o robô…</div>
+
+  <div class="cv-abas" role="tablist">
+    <button type="button" class="cv-aba ativa" role="tab" data-aba="um" aria-selected="true">💬 Um CT-e</button>
+    <button type="button" class="cv-aba" role="tab" data-aba="lote" aria-selected="false">📋 Vários de uma vez</button>
+  </div>
+
+  <section class="cv-card" id="cv-aba-um" aria-label="Assistente de emissão de CT-e">
     <div class="cv-topo">
       <ol class="cv-passos" id="cv-passos">
         <li class="cv-passo" data-passo="1"><span class="n">1</span>Tipo</li>
@@ -21,6 +28,46 @@
       <button type="button" class="btn" id="cv-recomecar">↺ Começar de novo</button>
     </div>
     <div class="cv-log" id="cv-log" aria-live="polite"></div>
+  </section>
+
+  <section class="cv-card cv-lote" id="cv-aba-lote" hidden aria-label="Emissão em lote">
+    <form id="lt-form" class="lt-form" autocomplete="off">
+      <label class="lt-campo">
+        <span class="bip-label">Tipo de CT-e (o mesmo para todas as notas)</span>
+        <select id="lt-tipo" required></select>
+      </label>
+      <label class="lt-campo lt-chaves">
+        <span class="bip-label" id="lt-chaves-rotulo">Chaves de acesso — uma por linha (pode bipar uma atrás da outra)</span>
+        <textarea id="lt-chaves" rows="8" spellcheck="false" placeholder="26261009722463000131550060007711051171417923&#10;…"></textarea>
+        <span class="cv-dica" id="lt-contagem">Nenhuma chave ainda.</span>
+      </label>
+      <label class="lt-campo" id="lt-solicitante-campo">
+        <span class="bip-label">Solicitado por</span>
+        <input type="text" id="lt-solicitante" maxlength="120" placeholder="Seu nome">
+      </label>
+      <label class="lt-check">
+        <input type="checkbox" id="lt-direto" checked>
+        <span><b>Salvar direto quando tudo bater</b> — frete calculado pelo GW (tabela do cliente) e um CT-e original só.
+          O resto (frete sem tabela, nota em mais de um CT-e, erro) fica esperando você aqui embaixo.</span>
+      </label>
+      <button type="submit" class="btn-primary" id="lt-enviar" disabled>Enviar</button>
+      <div class="cv-dica" id="lt-status"></div>
+    </form>
+
+    <div id="lt-andamento" hidden>
+      <div class="lt-resumo" id="lt-resumo"></div>
+      <div class="progress-track lt-barra"><div class="progress-fill" id="lt-barra"></div></div>
+      <div class="lt-acoes" id="lt-acoes"></div>
+      <div class="table-scroll">
+        <table class="detail">
+          <thead>
+            <tr><th>NF</th><th>CT-e original</th><th>Destinatário</th><th>Frete</th><th>Situação</th><th></th></tr>
+          </thead>
+          <tbody id="lt-body"></tbody>
+        </table>
+      </div>
+      <div class="cv-dica" id="lt-recusadas"></div>
+    </div>
   </section>
 
   <section class="table-section cv-recentes">
@@ -50,4 +97,5 @@
 {% endblock %}
 {% block scripts %}
 <script src="/static/emissao.js"></script>
+<script src="/static/emissao_lote.js"></script>
 {% endblock %}

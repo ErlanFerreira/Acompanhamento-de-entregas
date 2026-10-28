@@ -433,6 +433,7 @@ def emitir(
     solicitante: Optional[str] = None,
     simular: bool = False,
     headless: bool = True,
+    sessao: Optional["SessaoGW"] = None,
 ) -> Resultado:
     """Lança o CT-e `tipo` (chave de `TIPOS`) para a NF-e informada e salva
     sem transmitir. `simular=True` faz tudo menos salvar.
@@ -448,6 +449,8 @@ def emitir(
     - cte_id: id (do GW) do CT-e original já escolhido antes -- pula o
       escolher_cte.
     - solicitante: nome de quem pediu -- vai na observação do CT-e.
+    - sessao: navegador já logado (robô local, ver SessaoGW) -- sem ela,
+      abre um navegador, entra no GW e sai no fim.
     """
     if tipo not in TIPOS:
         raise EmissaoError(f"Tipo de CT-e '{tipo}' não suportado. Use um destes: {', '.join(TIPOS)}.")
@@ -455,96 +458,143 @@ def emitir(
     valor_tipo, rotulo_tipo = TIPOS[tipo]
     dialogos = _Dialogos(perguntar)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        context = browser.new_context(viewport={"width": 1600, "height": 1200})
-        context.on("page", lambda pg: pg.on("dialog", dialogos))
-        page = context.new_page()
-        try:
-            scrape._login(page)
-            frame = _abrir_cadastro(page)
+    args = (tipo, chave, valor_tipo, rotulo_tipo, dialogos, escolher_cte, informar_frete, confirmar,
+            frete_manual, cte_id, solicitante, simular)
+    if sessao is not None:
+        return _emitir(sessao, *args)
+    with SessaoGW(headless=headless) as nova:
+        return _emitir(nova, *args)
 
+
+class SessaoGW:
+    """Navegador logado no GW, reaproveitado entre um CT-e e outro -- o robô
+    local (scripts/robo_emissao.py) entra uma vez e emite vários em seguida,
+    sem pagar o login (~25 s) a cada um. Use com `with`: no fim, sai do GW."""
+
+    def __init__(self, headless: bool = True):
+        self.headless = headless
+        self._dialogos: Optional[_Dialogos] = None
+
+    def __enter__(self) -> "SessaoGW":
+        self._pw = sync_playwright().start()
+        self.browser = self._pw.chromium.launch(headless=self.headless)
+        self.context = self.browser.new_context(viewport={"width": 1600, "height": 1200})
+        self.context.on("page", lambda pg: pg.on("dialog", self._responder))
+        self.page = self.context.new_page()
+        scrape._login(self.page)
+        return self
+
+    def __exit__(self, *exc) -> None:
+        try:
+            scrape._logout(self.page)
+        finally:
+            self.browser.close()
+            self._pw.stop()
+
+    def _responder(self, dialog: Dialog) -> None:
+        if self._dialogos is not None:
+            self._dialogos(dialog)
+        else:
+            dialog.accept()
+
+    def comecar(self, dialogos: _Dialogos) -> Frame:
+        """Prepara a sessão para um CT-e novo: fecha janelas que sobraram do
+        anterior, passa os avisos do GW pra este CT-e e abre o cadastro em
+        branco -- entrando de novo no GW se a sessão tiver caído."""
+        self._dialogos = dialogos
+        for pg in self.context.pages:
+            if pg is not self.page:
+                pg.close()
+        try:
+            return _abrir_cadastro(self.page)
+        except EmissaoError:
+            scrape._login(self.page)
+            return _abrir_cadastro(self.page)
+
+
+def _emitir(sessao: SessaoGW, tipo, chave, valor_tipo, rotulo_tipo, dialogos, escolher_cte, informar_frete,
+            confirmar, frete_manual, cte_id, solicitante, simular) -> Resultado:
+    page, context = sessao.page, sessao.context
+    frame = sessao.comecar(dialogos)
+
+    frame.select_option("#tipoConhecimento", valor_tipo)
+    frame.wait_for_timeout(800)
+
+    if tipo in TIPOS_DA_NOTA:
+        original = None
+        dados = _importar_nota(context, frame, chave)
+        if dados["tipo_gw"] != valor_tipo:
+            # A importação não pode trocar o tipo (ex.: devolução com
+            # NFD virar Normal) -- volta pro escolhido.
             frame.select_option("#tipoConhecimento", valor_tipo)
             frame.wait_for_timeout(800)
-
-            if tipo in TIPOS_DA_NOTA:
-                original = None
-                dados = _importar_nota(context, frame, chave)
-                if dados["tipo_gw"] != valor_tipo:
-                    # A importação não pode trocar o tipo (ex.: devolução com
-                    # NFD virar Normal) -- volta pro escolhido.
-                    frame.select_option("#tipoConhecimento", valor_tipo)
-                    frame.wait_for_timeout(800)
-                    dados = _ler_formulario(frame)
-                    if dados["tipo_gw"] != valor_tipo:
-                        raise EmissaoError(f"O GW trocou o tipo do CT-e ao importar a nota ({dados['tipo_gw']}).")
-            else:
-                original = _carregar_original(context, frame, chave, rotulo_tipo, cte_id, escolher_cte)
-                page.wait_for_load_state("networkidle")
-                dados = _ler_formulario(frame)
-                if dados["id_original"] != original.id:
-                    scrape._salvar_debug(page, "emissao_cte")
-                    raise EmissaoError(f"O GW não vinculou o CT-e original {original.numero} ao novo lançamento.")
-                if valor_tipo == "p":
-                    _corrigir_obs_pallets(frame, original.numero)
-
-            valor_gw = round(_num(dados["composicao"]), 2)
-            frete_pendente = False
-            if frete_manual is not None:
-                frete, origem = frete_manual, "informado pelo usuário"
-            else:
-                if original is None:
-                    frete, origem = _frete_da_nota(dados, valor_gw, dialogos.mensagens)
-                else:
-                    frete, origem = _frete_da_tabela(valor_tipo, original, valor_gw)
-                if frete is None:
-                    frete = informar_frete(origem)
-                    if frete is None:
-                        if not simular:
-                            raise EmissaoError(f"Sem valor de frete ({origem}). Nada foi salvo.")
-                        frete_pendente = True
-                    else:
-                        origem = f"informado pelo usuário ({origem})"
-            if solicitante:
-                _anotar_solicitante(frame, solicitante)
-            if frete is not None and abs(frete - valor_gw) >= 0.005:
-                _aplicar_frete(frame, frete)
             dados = _ler_formulario(frame)
+            if dados["tipo_gw"] != valor_tipo:
+                raise EmissaoError(f"O GW trocou o tipo do CT-e ao importar a nota ({dados['tipo_gw']}).")
+    else:
+        original = _carregar_original(context, frame, chave, rotulo_tipo, cte_id, escolher_cte)
+        page.wait_for_load_state("networkidle")
+        dados = _ler_formulario(frame)
+        if dados["id_original"] != original.id:
+            scrape._salvar_debug(page, "emissao_cte")
+            raise EmissaoError(f"O GW não vinculou o CT-e original {original.numero} ao novo lançamento.")
+        if valor_tipo == "p":
+            _corrigir_obs_pallets(frame, original.numero)
 
-            resultado = Resultado(
-                tipo=rotulo_tipo,
-                original=original,
-                numero_ct=dados["numero_ct"],
-                remetente=dados["remetente"],
-                destinatario=dados["destinatario"],
-                tomador=dados["tomador"],
-                frete=0.0 if frete_pendente else round(_num(dados["composicao"]), 2),
-                total_prestacao=0.0 if frete_pendente else _num(dados["total"]),
-                origem_frete=origem,
-                observacao=dados["observacao"],
-                frete_pendente=frete_pendente,
-                mensagens=dialogos.mensagens,
-            )
-            if frete_pendente:
-                return resultado
-            if resultado.frete <= 0:
-                raise EmissaoError("Frete zerado -- o GW não aceitou o valor. Nada foi salvo.")
-            if simular or not confirmar(resultado):
-                return resultado
+    valor_gw = round(_num(dados["composicao"]), 2)
+    frete_pendente = False
+    if frete_manual is not None:
+        frete, origem = frete_manual, "informado pelo usuário"
+    else:
+        if original is None:
+            frete, origem = _frete_da_nota(dados, valor_gw, dialogos.mensagens)
+        else:
+            frete, origem = _frete_da_tabela(valor_tipo, original, valor_gw)
+        if frete is None:
+            frete = informar_frete(origem)
+            if frete is None:
+                if not simular:
+                    raise EmissaoError(f"Sem valor de frete ({origem}). Nada foi salvo.")
+                frete_pendente = True
+            else:
+                origem = f"informado pelo usuário ({origem})"
+    if solicitante:
+        _anotar_solicitante(frame, solicitante)
+    if frete is not None and abs(frete - valor_gw) >= 0.005:
+        _aplicar_frete(frame, frete)
+    dados = _ler_formulario(frame)
 
-            resultado.salvo = _salvar(page, frame, dialogos)
-            if not resultado.salvo:
-                scrape._salvar_debug(page, "emissao_cte_salvar")
-                return resultado
-            # O número mostrado antes de salvar é só o próximo livre -- se
-            # alguém lançou outro CT-e nesse meio tempo, o gravado é outro.
-            try:
-                salvo = _ler_formulario(page.frame(name="framePrincipal") or frame)
-                if int(_num(salvo["id_conhecimento"])) > 0 and salvo["numero_ct"]:
-                    resultado.numero_ct = salvo["numero_ct"]
-            except Exception:
-                logger.exception("Não consegui ler o número do CT-e depois de salvar.")
-            return resultado
-        finally:
-            scrape._logout(page)
-            browser.close()
+    resultado = Resultado(
+        tipo=rotulo_tipo,
+        original=original,
+        numero_ct=dados["numero_ct"],
+        remetente=dados["remetente"],
+        destinatario=dados["destinatario"],
+        tomador=dados["tomador"],
+        frete=0.0 if frete_pendente else round(_num(dados["composicao"]), 2),
+        total_prestacao=0.0 if frete_pendente else _num(dados["total"]),
+        origem_frete=origem,
+        observacao=dados["observacao"],
+        frete_pendente=frete_pendente,
+        mensagens=dialogos.mensagens,
+    )
+    if frete_pendente:
+        return resultado
+    if resultado.frete <= 0:
+        raise EmissaoError("Frete zerado -- o GW não aceitou o valor. Nada foi salvo.")
+    if simular or not confirmar(resultado):
+        return resultado
+
+    resultado.salvo = _salvar(page, frame, dialogos)
+    if not resultado.salvo:
+        scrape._salvar_debug(page, "emissao_cte_salvar")
+        return resultado
+    # O número mostrado antes de salvar é só o próximo livre -- se
+    # alguém lançou outro CT-e nesse meio tempo, o gravado é outro.
+    try:
+        salvo = _ler_formulario(page.frame(name="framePrincipal") or frame)
+        if int(_num(salvo["id_conhecimento"])) > 0 and salvo["numero_ct"]:
+            resultado.numero_ct = salvo["numero_ct"]
+    except Exception:
+        logger.exception("Não consegui ler o número do CT-e depois de salvar.")
+    return resultado

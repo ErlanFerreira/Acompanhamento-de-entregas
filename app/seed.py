@@ -32,6 +32,11 @@ _COLUNAS_ADICIONADAS = {
     "bipagens": {
         "protocolo_id": "INTEGER",
     },
+    "emissoes_cte": {
+        "salvar_direto": "BOOLEAN DEFAULT FALSE",
+        "executor": "VARCHAR(60)",
+        "lote": "VARCHAR(20)",
+    },
     "usuarios": {
         "trocar_senha": "BOOLEAN DEFAULT TRUE",
         "email": "VARCHAR(255)",

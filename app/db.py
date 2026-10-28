@@ -38,7 +38,7 @@ engine_consultas = engine_separado  # nome antigo (scripts/run_consulta.py)
 
 TABELAS_CONSULTA = {"consulta_jobs", "consulta_itens"}
 TABELAS_ACESSO = {"usuarios", "tentativas_login", "tratativas_comprovante"}
-TABELAS_EMISSAO = {"emissoes_cte"}
+TABELAS_EMISSAO = {"emissoes_cte", "emissao_robos"}
 TABELAS_SEPARADAS = TABELAS_CONSULTA | TABELAS_ACESSO | TABELAS_EMISSAO
 
 # Primeiro id das tabelas de acesso quando são criadas no banco separado --

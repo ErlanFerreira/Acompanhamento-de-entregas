@@ -26,7 +26,7 @@ from . import bloqueio_login, escopo, historico
 from .logistica import classificar as classificar_logistica
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
-from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, EmissaoCte, Meta, ProtocoloFatura, TratativaComprovante, Usuario
+from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, EmissaoCte, EmissaoRobo, Meta, ProtocoloFatura, TratativaComprovante, Usuario
 from .security import (
     COOKIE_MAX_AGE,
     COOKIE_NAME,
@@ -628,9 +628,16 @@ def api_sync_run():
 
 # ------------------------------------------------------- emissão CT-e -----
 #
-# O bot (app/emissao_cte.py) roda no GitHub Actions em etapas -- ver o
-# docstring de EmissaoCte. A tela só cria o pedido, mostra o que o bot achou
-# e repassa as decisões do supervisor (qual CT-e, valor do frete, salvar).
+# O bot (app/emissao_cte.py) roda em etapas -- ver o docstring de EmissaoCte
+# -- no robô instalado no PC do escritório (scripts/robo_emissao.py) quando
+# ele está ligado, ou no GitHub Actions. A tela só cria o pedido, mostra o
+# que o bot achou e repassa as decisões (qual CT-e, valor do frete, salvar).
+
+# Robô do PC sem sinal de vida há mais que isso = desligado (ele avisa a
+# cada 30 s).
+_SEGUNDOS_ROBO_LIGADO = 90
+# Lote: até quantas chaves por envio.
+_MAX_LOTE = 200
 
 # Pedido "preparando"/"salvando" parado há mais que isso = o workflow morreu
 # sem avisar (ou o GitHub não alocou máquina). Folga para a fila: as
@@ -638,13 +645,24 @@ def api_sync_run():
 _MINUTOS_MAX_EMISSAO = 30
 
 
+def _robo_ligado(db: Session) -> EmissaoRobo | None:
+    limite = datetime.datetime.utcnow() - datetime.timedelta(seconds=_SEGUNDOS_ROBO_LIGADO)
+    return (
+        db.query(EmissaoRobo)
+        .filter(EmissaoRobo.visto_em >= limite)
+        .order_by(EmissaoRobo.visto_em.desc())
+        .first()
+    )
+
+
 def _expirar_emissoes_paradas(db: Session) -> None:
     limite = datetime.datetime.utcnow() - datetime.timedelta(minutes=_MINUTOS_MAX_EMISSAO)
-    paradas = (
-        db.query(EmissaoCte)
-        .filter(EmissaoCte.status.in_(("preparando", "salvando")), EmissaoCte.atualizado_em < limite)
-        .all()
-    )
+    q = db.query(EmissaoCte).filter(EmissaoCte.status.in_(("preparando", "salvando")), EmissaoCte.atualizado_em < limite)
+    if _robo_ligado(db):
+        # Na fila do robô do PC (ainda não pego): num lote grande pode esperar
+        # bastante a vez -- não é travamento.
+        q = q.filter(or_(EmissaoCte.executor.is_(None), EmissaoCte.executor != "local"))
+    paradas = q.all()
     for em in paradas:
         if em.status == "salvando":
             em.erro_mensagem = (
@@ -675,12 +693,22 @@ def _emissao_to_dict(em: EmissaoCte) -> dict:
         "numero_ct": em.numero_ct,
         "mensagens": json.loads(em.mensagens) if em.mensagens else [],
         "erro_mensagem": em.erro_mensagem,
+        "executor": em.executor,
+        "lote": em.lote,
+        "salvar_direto": bool(em.salvar_direto),
     }
 
 
 def _disparar_emissao(db: Session, em: EmissaoCte, acao: str):
-    """Dispara a etapa no GitHub Actions; se não conseguir, o pedido vira
-    "erro" na hora (senão ficaria esperando um bot que nunca vai rodar)."""
+    """Manda a etapa pro robô do PC (se estiver ligado, ele pega em segundos)
+    ou dispara no GitHub Actions; se não conseguir, o pedido vira "erro" na
+    hora (senão ficaria esperando um bot que nunca vai rodar)."""
+    if _robo_ligado(db):
+        em.executor = "local"
+        db.commit()
+        return _emissao_to_dict(em)
+    em.executor = "github"
+    db.commit()
     resultado = _dispatch_workflow("emissao_cte.yml", {"emissao_id": str(em.id), "acao": acao})
     if not resultado["ok"]:
         em.status = "erro"
@@ -706,14 +734,90 @@ def emissao_page(request: Request):
 
 
 @app.get("/api/emissoes", dependencies=[Depends(require_emissao_api)])
-def api_emissoes_list(request: Request, db: Session = Depends(get_db)):
+def api_emissoes_list(request: Request, lote: str = "", db: Session = Depends(get_db)):
     _expirar_emissoes_paradas(db)
     q = db.query(EmissaoCte)
     analista = usuario_logado(request)
     if analista:  # o analista vê os pedidos dele; o supervisor, todos
         q = q.filter(EmissaoCte.solicitante == analista["nome"])
-    rows = q.order_by(EmissaoCte.criado_em.desc()).limit(30).all()
+    if lote:
+        rows = q.filter(EmissaoCte.lote == lote).order_by(EmissaoCte.id).limit(_MAX_LOTE).all()
+    else:
+        rows = q.order_by(EmissaoCte.criado_em.desc()).limit(30).all()
     return {"emissoes": [_emissao_to_dict(em) for em in rows]}
+
+
+@app.get("/api/emissoes/robo", dependencies=[Depends(require_emissao_api)])
+def api_emissoes_robo(db: Session = Depends(get_db)):
+    """Se o robô do PC está ligado (pedidos saem em segundos) e quantos
+    pedidos estão na fila dele."""
+    robo = _robo_ligado(db)
+    fila = (
+        db.query(func.count(EmissaoCte.id))
+        .filter(EmissaoCte.status.in_(("preparando", "salvando")), EmissaoCte.executor.like("local%"))
+        .scalar()
+    ) if robo else 0
+    return {
+        "ligado": bool(robo),
+        "nome": robo.nome if robo else None,
+        "situacao": robo.situacao if robo else None,
+        "fila": fila,
+    }
+
+
+@app.post("/api/emissoes/lote", dependencies=[Depends(require_emissao_api)])
+def api_emissoes_lote(request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Várias chaves de uma vez, mesmo tipo. Cada chave vira um pedido (o
+    robô vai emitindo em sequência); com "salvar direto", os que baterem
+    (frete calculado pelo GW, um CT-e original só) já saem salvos, e só as
+    exceções esperam alguém. Chave inválida, repetida no lote, com pedido em
+    andamento ou já salva com esse tipo fica de fora (volta na resposta)."""
+    tipo = str(payload.get("tipo") or "").strip()
+    solicitante = str(payload.get("solicitante") or "").strip()[:120]
+    analista = usuario_logado(request)
+    if analista:
+        solicitante = analista["nome"]
+    if tipo not in tipos_cte.TIPOS:
+        return JSONResponse({"erro": "Escolha o tipo de CT-e."}, status_code=400)
+    if not solicitante:
+        return JSONResponse({"erro": "Informe quem está pedindo a emissão."}, status_code=400)
+    linhas = [str(c).strip() for c in (payload.get("chaves") or []) if str(c).strip()]
+    if not linhas:
+        return JSONResponse({"erro": "Informe ao menos uma chave."}, status_code=400)
+    if len(linhas) > _MAX_LOTE:
+        return JSONResponse({"erro": f"No máximo {_MAX_LOTE} chaves por lote."}, status_code=400)
+
+    _expirar_emissoes_paradas(db)
+    lote = datetime.datetime.utcnow().strftime("%y%m%d%H%M%S%f")[:16]
+    criados, recusadas, vistas = [], [], set()
+    for linha in linhas:
+        try:
+            chave = tipos_cte.validar_chave_nfe(linha)
+        except tipos_cte.EmissaoError as e:
+            recusadas.append({"chave": linha, "motivo": str(e).rstrip(".")})
+            continue
+        if chave in vistas:
+            recusadas.append({"chave": chave, "motivo": "Repetida neste lote."})
+            continue
+        vistas.add(chave)
+        anteriores = db.query(EmissaoCte).filter(EmissaoCte.chave_nfe == chave, EmissaoCte.tipo == tipo)
+        if anteriores.filter(EmissaoCte.status.in_(_STATUS_EM_ANDAMENTO)).first():
+            recusadas.append({"chave": chave, "motivo": "Já tem pedido em andamento."})
+            continue
+        salvo = anteriores.filter(EmissaoCte.status == "salvo").first()
+        if salvo:
+            recusadas.append({"chave": chave, "motivo": f"Já tem CT-e salvo com esse tipo ({salvo.numero_ct})."})
+            continue
+        em = EmissaoCte(tipo=tipo, chave_nfe=chave, solicitante=solicitante, status="preparando",
+                        lote=lote, salvar_direto=bool(payload.get("salvar_direto")))
+        db.add(em)
+        criados.append(em)
+    db.commit()
+    for em in criados:
+        resposta = _disparar_emissao(db, em, "preparar")
+        if isinstance(resposta, JSONResponse):  # GitHub fora: os outros também não iriam
+            break
+    return {"lote": lote, "criados": len(criados), "recusadas": recusadas, "robo_ligado": bool(_robo_ligado(db))}
 
 
 @app.get("/api/emissoes/{emissao_id}", dependencies=[Depends(require_emissao_api)])

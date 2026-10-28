@@ -3,6 +3,7 @@ __pycache__/
 .env
 local.db
 server.log
+robo_emissao.log
 venv/
 .venv/
 .claude/

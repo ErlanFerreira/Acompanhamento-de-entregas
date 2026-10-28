@@ -303,3 +303,23 @@ class EmissaoCte(Base):
     numero_ct = Column(String(20), nullable=True)
     mensagens = Column(Text, nullable=True)  # JSON: alerts/confirms do GW
     erro_mensagem = Column(String(1000), nullable=True)
+    # Pedido de lote com "salvar direto": se o frete vier do GW e houver um
+    # CT-e original só, o preparar já salva (sem passar por "conferir").
+    salvar_direto = Column(Boolean, default=False, nullable=False)
+    # Quem processa: "local" (robô do PC, ainda na fila), "local:<PC>" (o
+    # robô daquele PC pegou) ou "github" (workflow, com o robô desligado).
+    executor = Column(String(60), nullable=True)
+    lote = Column(String(20), nullable=True, index=True)  # pedidos enviados juntos
+
+
+class EmissaoRobo(Base):
+    """Sinal de vida do robô de emissão instalado num PC (scripts/robo_emissao.py)
+    -- o painel manda os pedidos pra ele em vez do GitHub enquanto ele der
+    sinal (ver _robo_ligado em main.py)."""
+
+    __tablename__ = "emissao_robos"
+
+    id = Column(Integer, primary_key=True)
+    nome = Column(String(120), unique=True, nullable=False)  # nome do PC
+    visto_em = Column(DateTime, nullable=True)
+    situacao = Column(String(255), nullable=True)  # ex.: "emitindo pedido 12"

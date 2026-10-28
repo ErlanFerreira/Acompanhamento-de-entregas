@@ -27,6 +27,7 @@
   const CHAVE_NOME = "emissao_solicitante";
 
   let estado = {};
+  let roboLigado = false; // robô do PC ligado: os pedidos saem em segundos
   let espera = null; // {timer, relogio} do "procurando no GW..."
 
   // ------------------------------------------------------------ util ----
@@ -325,7 +326,10 @@
     passo(em.status === "salvando" ? 4 : 3);
     const m = bot('<span class="cv-espera"><span class="cv-spinner" aria-hidden="true"></span><span>' + esc(texto) +
       '</span><span class="cv-tempo">0:00</span></span>' +
-      '<div class="cv-dica">Costuma levar de 1 a 3 minutos. Pode usar o resto do painel enquanto isso — o pedido continua em “Pedidos recentes”.</div>');
+      '<div class="cv-dica">' + (roboLigado
+        ? "O robô do PC já está trabalhando nisso — costuma levar menos de 1 minuto (mais, se houver fila)."
+        : "Costuma levar de 1 a 3 minutos (o robô do PC está desligado, vai pelo GitHub).") +
+      " Pode usar o resto do painel enquanto isso — o pedido continua em “Pedidos recentes”.</div>");
     const tempo = m.texto.querySelector(".cv-tempo");
     const comeco = Date.now();
     const statusInicial = em.status;
@@ -544,16 +548,59 @@
     const em = (estado.recentes || []).find(x => String(x.id) === btn.dataset.abrir);
     if (!em) return;
     const recentes = estado.recentes;
-    retomar(em);
+    abrirNaConversa(em);
     estado.recentes = recentes;
-    document.querySelector(".cv-card").scrollIntoView({ behavior: "smooth" });
   });
 
   document.getElementById("cv-recomecar").addEventListener("click", inicio);
 
+  // ------------------------------------------------------------- abas ----
+
+  function mostrarAba(aba) {
+    document.querySelectorAll(".cv-aba").forEach(b => {
+      const ativa = b.dataset.aba === aba;
+      b.classList.toggle("ativa", ativa);
+      b.setAttribute("aria-selected", String(ativa));
+    });
+    document.getElementById("cv-aba-um").hidden = aba !== "um";
+    document.getElementById("cv-aba-lote").hidden = aba !== "lote";
+    guardar("emissao_aba", aba);
+  }
+  document.querySelectorAll(".cv-aba").forEach(b => b.addEventListener("click", () => mostrarAba(b.dataset.aba)));
+
+  function abrirNaConversa(em) {
+    mostrarAba("um");
+    retomar(em);
+    document.getElementById("cv-aba-um").scrollIntoView({ behavior: "smooth" });
+  }
+
+  // ------------------------------------------------------------- robô ----
+
+  async function verRobo() {
+    const r = await api("/api/emissoes/robo").catch(() => null);
+    const el = document.getElementById("cv-robo");
+    if (!r || !r.ok) { el.textContent = ""; return; }
+    roboLigado = r.body.ligado;
+    el.className = "cv-robo " + (roboLigado ? "ligado" : "desligado");
+    el.innerHTML = roboLigado
+      ? "🟢 <b>Robô do PC ligado</b> — os pedidos saem em segundos." +
+        (r.body.fila ? " Na fila agora: <b>" + r.body.fila + "</b>." : "")
+      : "⚪ <b>Robô do PC desligado</b> — os pedidos vão pelo GitHub e levam alguns minutos cada. " +
+        "Para emitir rápido (e em lote), ligue o robô no PC do escritório.";
+  }
+  verRobo();
+  setInterval(verRobo, 30000);
+
+  // A aba de lote (emissao_lote.js) reaproveita estes.
+  window.emissaoChat = {
+    api, esc, moeda, nf, dvConfere, dadosChave, ler, guardar, msgErro, TIPOS, TIPO, SOLICITANTE_FIXO,
+    STATUS_LABEL, abrirNaConversa, carregarRecentes, roboLigado: () => roboLigado,
+  };
+
   // ------------------------------------------------------------ início ----
 
   (async function () {
+    if (ler("emissao_aba") === "lote") mostrarAba("lote");
     carregarRecentes();
     const atual = ler(CHAVE_ATUAL);
     if (atual) {

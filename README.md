@@ -210,7 +210,41 @@ O robô entra no GW com um usuário só dele; para saber no GW quem pediu, o
 nome vai na observação do CT-e ("Solicitado por: Maria Silva (painel)", na
 primeira linha livre depois da que o GW preenche) — sai também no DACTE.
 
-As emissões rodam uma por vez (`concurrency` do workflow). Configuração:
+### Robô no PC do escritório (rápido e em lote)
+
+Pelo GitHub Actions cada etapa de cada CT-e leva 1-3 min (máquina nova, instalar
+o navegador, entrar no GW). Com o **robô local** (`scripts/robo_emissao.py`)
+ligado num PC, ele entra no GW uma vez e emite os pedidos assim que chegam:
+**~13 s por CT-e**. Enquanto ele dá sinal de vida (a cada 30 s, tabela
+`emissao_robos`), o painel manda os pedidos pra ele; desligado, volta a usar o
+GitHub sozinho. A tela mostra no topo se o robô está ligado.
+
+Na aba **"Vários de uma vez"** a pessoa cola ou bipa várias chaves (mesmo tipo)
+e pode marcar **"Salvar direto quando tudo bater"**: frete calculado pelo GW e
+um CT-e original só já saem salvos numa passada; o resto (frete sem tabela,
+nota em mais de um CT-e, erro) fica na lista do lote com "Resolver", que abre
+o pedido na conversa. Sem "salvar direto", o lote volta para conferir e o botão
+"Salvar os N…" salva todos de uma vez com o frete calculado.
+
+Instalação no PC (uma vez):
+
+```bash
+python -m pip install -r requirements-sync.txt
+python -m playwright install chromium
+```
+
+No `.env` desse PC: `CONSULTAS_DATABASE_URL` (o banco separado do painel, onde
+ficam os pedidos), `EMISSAO_PORTAL_EMAIL` e `EMISSAO_PORTAL_SENHA` (o login do
+GW do robô — não o de quem usa o PC, senão derruba a pessoa) e, se o robô tiver
+Colaborador em mais de uma organização, `EMISSAO_PORTAL_ORGANIZACAO` (CNPJ).
+Para ligar: dois cliques em `scripts
+obo_emissao.bat` e deixar a janela aberta
+(log também em `robo_emissao.log`). `--ver` mostra o navegador; `--simular`
+(só com banco local de teste) faz tudo menos salvar. Se o robô cair no meio de
+um salvamento, ele **não** refaz sozinho: o pedido vira erro pedindo para
+conferir no GW, pra não gravar o mesmo CT-e duas vezes.
+
+Pelo GitHub (robô desligado), as emissões rodam uma por vez (`concurrency` do workflow). Configuração:
 
 - Criar no GW um **usuário só para o bot**, com permissão de lançar CT-e
   (assim ele não derruba a sessão de ninguém nem da sincronização).
