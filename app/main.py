@@ -22,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem, tipos_cte
-from . import bloqueio_login, escopo, historico
+from . import bloqueio_login, escopo, gdc, historico
 from .logistica import classificar as classificar_logistica
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(historico.router)
+app.include_router(gdc.router)
 
 
 @app.exception_handler(SQLAlchemyError)
@@ -242,6 +243,11 @@ def painel_page(request: Request):
 def historico_page(request: Request):
     """Tendência dos números dia a dia (foto gravada a cada sincronização)."""
     return templates.TemplateResponse("historico.html", {"request": request, "active": "historico"})
+
+
+@app.get("/gdc", response_class=HTMLResponse, dependencies=[Depends(require_acesso_completo_page)])
+def gdc_page(request: Request):
+    return templates.TemplateResponse("gdc.html", {"request": request, "active": "gdc", "banco_proprio": gdc.BANCO_PROPRIO})
 
 
 @app.get("/comprovantes", response_class=HTMLResponse, dependencies=[Depends(require_acesso_completo_page)])

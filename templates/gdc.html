@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Controle GDC — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+  <header class="app-header">
+    <div>
+      <h1>Controle GDC</h1>
+      <p>Lançamento das entregas da operação GDC: guia, notas fiscais, destinatário, manifesto e ocorrências (devolução e retenção de paletes). Tudo fica gravado para consultar o histórico.</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="btn-primary" id="btn-novo" type="button" style="margin:0;">+ Nova entrega</button>
+      <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+    </div>
+  </header>
+
+  {% if not banco_proprio %}
+  <div class="bip-feedback aviso show" style="margin: -6px 0 16px;">Banco próprio do GDC ainda não configurado (variável <code>GDC_DATABASE_URL</code>) — os lançamentos estão sendo gravados no banco principal.</div>
+  {% endif %}
+
+  <section class="kpis gdc-kpis">
+    <div class="stat-tile"><div class="label">Lançamentos</div><div class="value" id="k-total">—</div><div class="sub">no filtro atual</div></div>
+    <button type="button" class="stat-tile warning" data-filtro="baixado" data-valor="nao"><div class="label">Manifestos não baixados</div><div class="value" id="k-nao-baixados">—</div><div class="sub">clique para filtrar</div></button>
+    <button type="button" class="stat-tile serious" data-filtro="devolucao" data-valor="sim"><div class="label">Com devolução</div><div class="value" id="k-devolucoes">—</div><div class="sub">clique para filtrar</div></button>
+    <button type="button" class="stat-tile critical" data-filtro="retencao" data-valor="sim"><div class="label">Retenção de paletes</div><div class="value" id="k-retencoes">—</div><div class="sub" id="k-palets">clique para filtrar</div></button>
+  </section>
+
+  <section class="filters">
+    <input type="text" id="f-busca" placeholder="Buscar guia, NF, manifesto, destinatário, cidade…">
+    <div class="filter-group"><span class="filter-label">De</span><input type="date" id="f-de"></div>
+    <div class="filter-group"><span class="filter-label">Até</span><input type="date" id="f-ate"></div>
+    <div class="filter-group"><span class="filter-label">Manifesto baixado</span>
+      <select id="f-baixado"><option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option></select></div>
+    <div class="filter-group"><span class="filter-label">Devolução</span>
+      <select id="f-devolucao"><option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option></select></div>
+    <div class="filter-group"><span class="filter-label">Retenção</span>
+      <select id="f-retencao"><option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option></select></div>
+    <span class="filters-spacer"></span>
+    <span class="reset-link" id="f-limpar">Limpar filtros</span>
+  </section>
+
+  <section class="table-section">
+    <div class="table-toolbar">
+      <h2>Entregas lançadas</h2>
+      <span class="count" id="gdc-count"></span>
+      <span class="filters-spacer"></span>
+      <button type="button" class="btn" id="btn-exportar">⬇ Exportar Excel</button>
+    </div>
+    <div class="table-scroll gdc-scroll">
+      <table class="detail">
+        <thead>
+          <tr><th>Data</th><th>Guia</th><th>Notas fiscais</th><th>Destinatário</th><th>Cidade</th><th>Manifesto</th><th>Baixado</th><th>Devolução</th><th>Paletes retidos</th><th>Observação</th><th></th></tr>
+        </thead>
+        <tbody id="gdc-body"><tr><td colspan="11"><div class="empty-state">Carregando…</div></td></tr></tbody>
+      </table>
+    </div>
+    <div class="pagination" id="gdc-paginacao" hidden>
+      <button type="button" class="btn" id="pg-anterior">‹ Anterior</button>
+      <span id="pg-info"></span>
+      <button type="button" class="btn" id="pg-proxima">Próxima ›</button>
+    </div>
+  </section>
+</div>
+
+<div class="modal-overlay" id="gdc-modal" hidden>
+  <form class="modal-card gdc-modal" id="gdc-form" role="dialog" aria-modal="true" aria-labelledby="gdc-titulo" novalidate>
+    <div class="comp-trat-topo">
+      <h3 id="gdc-titulo">Nova entrega</h3>
+      <button type="button" class="btn" id="gdc-fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="gdc-campos">
+      <label>Número da guia<input type="text" id="g-guia" maxlength="40" required autocomplete="off"></label>
+      <label>Data<input type="date" id="g-data" required></label>
+      <label class="gdc-largo">Destinatário<input type="text" id="g-destinatario" maxlength="200" required></label>
+      <label>Cidade<input type="text" id="g-cidade" maxlength="120"></label>
+      <label>Número do manifesto<input type="text" id="g-manifesto" maxlength="40" autocomplete="off"></label>
+    </div>
+
+    <div class="comp-trat-sec">Notas fiscais</div>
+    <div class="gdc-notas" id="g-notas"></div>
+    <div><button type="button" class="btn" id="g-add-nota">+ Adicionar NF</button></div>
+
+    <div class="comp-trat-sec">Ocorrências</div>
+    <div class="gdc-simnao">
+      <div class="gdc-pergunta"><span>Manifesto baixado?</span>
+        <label><input type="radio" name="g-baixado" value="sim"> Sim</label>
+        <label><input type="radio" name="g-baixado" value="nao" checked> Não</label></div>
+      <div class="gdc-pergunta"><span>Houve devolução?</span>
+        <label><input type="radio" name="g-devolucao" value="sim"> Sim</label>
+        <label><input type="radio" name="g-devolucao" value="nao" checked> Não</label></div>
+      <div class="gdc-pergunta"><span>Retenção de paletes?</span>
+        <label><input type="radio" name="g-retencao" value="sim"> Sim</label>
+        <label><input type="radio" name="g-retencao" value="nao" checked> Não</label>
+        <label class="gdc-qtd" id="g-qtd-wrap" hidden>Quantidade <input type="number" id="g-qtd" min="1" max="9999" step="1"></label></div>
+    </div>
+
+    <label>Observação<textarea id="g-obs" rows="3" maxlength="4000"></textarea></label>
+    <div class="gdc-autoria" id="g-autoria"></div>
+    <div class="modal-error" id="gdc-erro"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="gdc-cancelar">Cancelar</button>
+      <button type="submit" class="btn-primary" id="gdc-salvar">Salvar</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/gdc.js"></script>
+{% endblock %}
