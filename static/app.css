@@ -561,5 +561,8 @@ section.kpis.gdc-kpis { grid-template-columns: repeat(4, 1fr); }
 .gdc-modal .gdc-pergunta label.gdc-qtd { cursor: default; }
 .gdc-qtd input[type="number"] { width: 90px; }
 .gdc-autoria { font-size: 11.5px; color: var(--text-muted); }
+.gdc-devolucao { display: flex; flex-direction: column; gap: 8px; margin: -2px 0 4px 18px; padding-left: 12px; border-left: 3px solid var(--status-serious); }
+.gdc-dev { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.gdc-nfd { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
 @media (max-width: 980px) { section.kpis.gdc-kpis { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 640px) { .gdc-campos { grid-template-columns: 1fr; } }

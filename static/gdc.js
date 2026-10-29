@@ -3,7 +3,7 @@
 
   // Controle de entregas da operação GDC: lista com filtros (o servidor filtra
   // e pagina -- /api/gdc) e o formulário de lançamento/edição, com quantas
-  // notas fiscais a guia tiver.
+  // notas fiscais a guia tiver (e NFD + observações quando houve devolução).
 
   function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
   function fmtN(n) { return Number(n || 0).toLocaleString("pt-BR"); }
@@ -58,6 +58,13 @@
              : '<span class="bip-tag ' + (ruim ? "gdc-neutro" : "gdc-pendente") + '">Não</span>';
   }
 
+  function devolucao(e) {
+    if (!e.devolucao) return simNao(false, true);
+    const nfd = e.nfd ? '<span class="gdc-nfd">NFD ' + esc(e.nfd) + '</span>' : '<span class="bip-tag gdc-pendente">sem NFD</span>';
+    return '<span class="gdc-dev"' + (e.obs_devolucao ? ' title="' + esc(e.obs_devolucao) + '"' : "") + '>' +
+      simNao(true, true) + " " + nfd + (e.obs_devolucao ? ' <span class="bip-muted">💬</span>' : "") + "</span>";
+  }
+
   function render(r) {
     const s = r.resumo;
     $("k-total").textContent = fmtN(s.total);
@@ -89,7 +96,7 @@
       '<td>' + esc(e.cidade) + '</td>' +
       '<td class="num">' + (e.manifesto ? esc(e.manifesto) : '<span class="bip-muted">—</span>') + '</td>' +
       '<td>' + simNao(e.manifesto_baixado, false) + '</td>' +
-      '<td>' + simNao(e.devolucao, true) + '</td>' +
+      '<td>' + devolucao(e) + '</td>' +
       '<td>' + (e.retencao_palets ? '<span class="bip-tag gdc-ruim">' + fmtN(e.qtd_palets) + '</span>' : '<span class="bip-tag gdc-neutro">Não</span>') + '</td>' +
       '<td class="gdc-obs" title="' + esc(e.observacao) + '">' + esc(e.observacao) + '</td>' +
       '<td class="bip-acoes"><button type="button" class="btn" data-editar="' + i + '">Editar</button> ' +
@@ -142,6 +149,12 @@
     if (ret && !$("g-qtd").value) $("g-qtd").focus();
   }
 
+  function atualizarDevolucao() {
+    const dev = marcado("g-devolucao");
+    $("g-dev-wrap").hidden = !dev;
+    if (dev && !$("g-nfd").value) $("g-nfd").focus();
+  }
+
   function abrir(e) {
     editando = e || null;
     $("gdc-titulo").textContent = e ? "Editar entrega — guia " + e.guia : "Nova entrega";
@@ -152,10 +165,13 @@
     $("g-manifesto").value = e ? e.manifesto : "";
     $("g-obs").value = e ? e.observacao : "";
     $("g-qtd").value = e && e.qtd_palets ? e.qtd_palets : "";
+    $("g-nfd").value = e ? e.nfd : "";
+    $("g-obs-dev").value = e ? e.obs_devolucao : "";
     marcar("g-baixado", e && e.manifesto_baixado);
     marcar("g-devolucao", e && e.devolucao);
     marcar("g-retencao", e && e.retencao_palets);
     $("g-qtd-wrap").hidden = !(e && e.retencao_palets);
+    $("g-dev-wrap").hidden = !(e && e.devolucao);
     $("g-notas").innerHTML = "";
     (e && e.notas.length ? e.notas : [""]).forEach(addNota);
     $("g-autoria").textContent = e
@@ -181,6 +197,7 @@
       cidade: $("g-cidade").value, manifesto: $("g-manifesto").value, observacao: $("g-obs").value,
       notas: [...$("g-notas").querySelectorAll("input")].map(i => i.value.trim()).filter(Boolean),
       manifesto_baixado: marcado("g-baixado"), devolucao: marcado("g-devolucao"),
+      nfd: $("g-nfd").value, obs_devolucao: $("g-obs-dev").value,
       retencao_palets: marcado("g-retencao"), qtd_palets: $("g-qtd").value,
       confirmar_repetida: !!confirmarRepetida,
     };
@@ -210,6 +227,7 @@
   $("gdc-form").addEventListener("submit", salvar);
   $("g-add-nota").addEventListener("click", () => addNota("").querySelector("input").focus());
   document.querySelectorAll('input[name="g-retencao"]').forEach(r => r.addEventListener("change", atualizarQtd));
+  document.querySelectorAll('input[name="g-devolucao"]').forEach(r => r.addEventListener("change", atualizarDevolucao));
   modal.addEventListener("click", ev => { if (ev.target === modal) fechar(); });
   document.addEventListener("keydown", ev => { if (ev.key === "Escape" && !modal.hidden) fechar(); });
 

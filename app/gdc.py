@@ -15,7 +15,7 @@ import openpyxl
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from openpyxl.styles import Font, PatternFill
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, case, func, or_
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, case, func, inspect, or_, text
 from sqlalchemy.orm import Session, declarative_base, relationship, selectinload, sessionmaker
 
 from . import db as banco
@@ -45,6 +45,8 @@ class GdcEntrega(GdcBase):
     manifesto = Column(String(40), nullable=False, default="", index=True)
     manifesto_baixado = Column(Boolean, nullable=False, default=False)
     devolucao = Column(Boolean, nullable=False, default=False)
+    nfd = Column(String(60), nullable=False, default="")  # NF de devolução
+    obs_devolucao = Column(Text, nullable=False, default="")
     retencao_palets = Column(Boolean, nullable=False, default=False)
     qtd_palets = Column(Integer, nullable=False, default=0)
     observacao = Column(Text, nullable=False, default="")
@@ -64,7 +66,24 @@ class GdcNota(GdcBase):
     numero = Column(String(20), nullable=False, index=True)
 
 
+# Colunas criadas depois que a tabela já existia -- `create_all` não altera
+# tabelas existentes.
+_COLUNAS_ADICIONADAS = {
+    "gdc_entregas": {"nfd": "VARCHAR(60) NOT NULL DEFAULT ''", "obs_devolucao": "TEXT NOT NULL DEFAULT ''"},
+}
+
 _tabelas_ok = False
+
+
+def _preparar_tabelas() -> None:
+    GdcBase.metadata.create_all(bind=engine_gdc)
+    se_nao_existe = "IF NOT EXISTS " if engine_gdc.dialect.name == "postgresql" else ""
+    for tabela, colunas in _COLUNAS_ADICIONADAS.items():
+        existentes = {c["name"] for c in inspect(engine_gdc).get_columns(tabela)}
+        for nome, tipo in colunas.items():
+            if nome not in existentes:
+                with engine_gdc.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {tabela} ADD COLUMN {se_nao_existe}{nome} {tipo}"))
 
 
 def get_gdc_db():
@@ -72,7 +91,7 @@ def get_gdc_db():
     usa a tela (a função da Vercel pode subir sem rodar o seed)."""
     global _tabelas_ok
     if not _tabelas_ok:
-        GdcBase.metadata.create_all(bind=engine_gdc)
+        _preparar_tabelas()
         _tabelas_ok = True
     db = SessionGdc()
     try:
@@ -95,7 +114,7 @@ def _to_dict(e: GdcEntrega) -> dict:
         "id": e.id, "guia": e.guia, "notas": [n.numero for n in e.notas],
         "destinatario": e.destinatario, "cidade": e.cidade, "data": e.data.isoformat(),
         "manifesto": e.manifesto, "manifesto_baixado": e.manifesto_baixado,
-        "devolucao": e.devolucao, "retencao_palets": e.retencao_palets, "qtd_palets": e.qtd_palets,
+        "devolucao": e.devolucao, "nfd": e.nfd, "obs_devolucao": e.obs_devolucao, "retencao_palets": e.retencao_palets, "qtd_palets": e.qtd_palets,
         "observacao": e.observacao,
         "criado_por": e.criado_por, "criado_em": e.criado_em.isoformat() if e.criado_em else None,
         "atualizado_por": e.atualizado_por, "atualizado_em": e.atualizado_em.isoformat() if e.atualizado_em else None,
@@ -113,7 +132,8 @@ def _filtrar(q, busca: str, de: str, ate: str, baixado: str, devolucao: str, ret
         q = q.filter(or_(
             GdcEntrega.guia.ilike(termo), GdcEntrega.manifesto.ilike(termo),
             GdcEntrega.destinatario.ilike(termo), GdcEntrega.cidade.ilike(termo),
-            GdcEntrega.observacao.ilike(termo), GdcEntrega.notas.any(GdcNota.numero.ilike(termo)),
+            GdcEntrega.observacao.ilike(termo), GdcEntrega.nfd.ilike(termo),
+            GdcEntrega.obs_devolucao.ilike(termo), GdcEntrega.notas.any(GdcNota.numero.ilike(termo)),
         ))
     for valor, op in ((de, "__ge__"), (ate, "__le__")):
         try:
@@ -137,6 +157,9 @@ def _validar(payload: dict) -> tuple[dict | None, str | None]:
         "manifesto_baixado": bool(payload.get("manifesto_baixado")), "devolucao": bool(payload.get("devolucao")),
         "retencao_palets": bool(payload.get("retencao_palets")),
     }
+    # NFD e a observação da devolução só valem quando houve devolução.
+    dados["nfd"] = texto("nfd", 60) if dados["devolucao"] else ""
+    dados["obs_devolucao"] = str(payload.get("obs_devolucao") or "").strip()[:4000] if dados["devolucao"] else ""
     if not dados["guia"]:
         return None, "Informe o número da guia."
     if not dados["destinatario"]:
@@ -255,7 +278,7 @@ def api_gdc_exportar(busca: str = "", de: str = "", ate: str = "", baixado: str 
     ws = wb.active
     ws.title = "Controle GDC"
     cabecalho = ["Data", "Guia", "Notas fiscais", "Destinatário", "Cidade", "Manifesto", "Manifesto baixado",
-                 "Devolução", "Retenção de paletes", "Qtd. paletes", "Observação", "Lançado por", "Lançado em"]
+                 "Devolução", "NFD", "Obs. da devolução", "Retenção de paletes", "Qtd. paletes", "Observação", "Lançado por", "Lançado em"]
     ws.append(cabecalho)
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
@@ -263,11 +286,11 @@ def api_gdc_exportar(busca: str = "", de: str = "", ate: str = "", baixado: str 
     sn = {True: "Sim", False: "Não"}
     for e in itens:
         ws.append([e.data, e.guia, ", ".join(n.numero for n in e.notas), e.destinatario, e.cidade, e.manifesto,
-                   sn[e.manifesto_baixado], sn[e.devolucao], sn[e.retencao_palets], e.qtd_palets or None,
+                   sn[e.manifesto_baixado], sn[e.devolucao], e.nfd, e.obs_devolucao, sn[e.retencao_palets], e.qtd_palets or None,
                    e.observacao, e.criado_por, e.criado_em])
         ws.cell(ws.max_row, 1).number_format = "DD/MM/YYYY"
-        ws.cell(ws.max_row, 13).number_format = "DD/MM/YYYY HH:MM"
-    for letra, largura in zip("ABCDEFGHIJKLM", (12, 14, 26, 36, 22, 14, 10, 10, 10, 10, 50, 20, 17)):
+        ws.cell(ws.max_row, 15).number_format = "DD/MM/YYYY HH:MM"
+    for letra, largura in zip("ABCDEFGHIJKLMNO", (12, 14, 26, 36, 22, 14, 10, 10, 14, 40, 10, 10, 50, 20, 17)):
         ws.column_dimensions[letra].width = largura
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions

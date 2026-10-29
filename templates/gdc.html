@@ -87,6 +87,10 @@
       <div class="gdc-pergunta"><span>Houve devolução?</span>
         <label><input type="radio" name="g-devolucao" value="sim"> Sim</label>
         <label><input type="radio" name="g-devolucao" value="nao" checked> Não</label></div>
+      <div class="gdc-devolucao" id="g-dev-wrap" hidden>
+        <label>NFD (nota fiscal de devolução)<input type="text" id="g-nfd" maxlength="60" autocomplete="off"></label>
+        <label>Observações da devolução<textarea id="g-obs-dev" rows="2" maxlength="4000" placeholder="Motivo, itens devolvidos…"></textarea></label>
+      </div>
       <div class="gdc-pergunta"><span>Retenção de paletes?</span>
         <label><input type="radio" name="g-retencao" value="sim"> Sim</label>
         <label><input type="radio" name="g-retencao" value="nao" checked> Não</label>
