@@ -44,6 +44,11 @@ class GdcEntrega(GdcBase):
     data = Column(Date, nullable=False, index=True)
     manifesto = Column(String(40), nullable=False, default="", index=True)
     manifesto_baixado = Column(Boolean, nullable=False, default=False)
+    data_baixa = Column(Date)  # quando o manifesto foi baixado
+    baixa_gw = Column(Boolean, nullable=False, default=False)
+    data_baixa_gw = Column(Date)
+    baixa_portal = Column(Boolean, nullable=False, default=False)  # portal do GDC
+    data_baixa_portal = Column(Date)
     devolucao = Column(Boolean, nullable=False, default=False)
     nfd = Column(String(60), nullable=False, default="")  # NF de devolução
     obs_devolucao = Column(Text, nullable=False, default="")
@@ -69,8 +74,17 @@ class GdcNota(GdcBase):
 # Colunas criadas depois que a tabela já existia -- `create_all` não altera
 # tabelas existentes.
 _COLUNAS_ADICIONADAS = {
-    "gdc_entregas": {"nfd": "VARCHAR(60) NOT NULL DEFAULT ''", "obs_devolucao": "TEXT NOT NULL DEFAULT ''"},
+    "gdc_entregas": {"nfd": "VARCHAR(60) NOT NULL DEFAULT ''", "obs_devolucao": "TEXT NOT NULL DEFAULT ''",
+                     "data_baixa": "DATE", "baixa_gw": "BOOLEAN NOT NULL DEFAULT FALSE", "data_baixa_gw": "DATE",
+                     "baixa_portal": "BOOLEAN NOT NULL DEFAULT FALSE", "data_baixa_portal": "DATE"},
 }
+
+# As baixas (sim/não + data quando sim): coluna, coluna da data, nome na tela.
+BAIXAS = (
+    ("manifesto_baixado", "data_baixa", "Manifesto baixado"),
+    ("baixa_gw", "data_baixa_gw", "Baixa no GW"),
+    ("baixa_portal", "data_baixa_portal", "Baixa no portal GDC"),
+)
 
 _tabelas_ok = False
 
@@ -113,9 +127,11 @@ def _to_dict(e: GdcEntrega) -> dict:
     return {
         "id": e.id, "guia": e.guia, "notas": [n.numero for n in e.notas],
         "destinatario": e.destinatario, "cidade": e.cidade, "data": e.data.isoformat(),
-        "manifesto": e.manifesto, "manifesto_baixado": e.manifesto_baixado,
-        "devolucao": e.devolucao, "nfd": e.nfd, "obs_devolucao": e.obs_devolucao, "retencao_palets": e.retencao_palets, "qtd_palets": e.qtd_palets,
-        "observacao": e.observacao,
+        "manifesto": e.manifesto,
+        **{c: getattr(e, c) for c, _, _ in BAIXAS},
+        **{d: getattr(e, d).isoformat() if getattr(e, d) else None for _, d, _ in BAIXAS},
+        "devolucao": e.devolucao, "nfd": e.nfd, "obs_devolucao": e.obs_devolucao,
+        "retencao_palets": e.retencao_palets, "qtd_palets": e.qtd_palets, "observacao": e.observacao,
         "criado_por": e.criado_por, "criado_em": e.criado_em.isoformat() if e.criado_em else None,
         "atualizado_por": e.atualizado_por, "atualizado_em": e.atualizado_em.isoformat() if e.atualizado_em else None,
     }
@@ -125,7 +141,8 @@ def _sim_nao(valor) -> bool | None:
     return {"sim": True, "nao": False}.get(str(valor or "").lower())
 
 
-def _filtrar(q, busca: str, de: str, ate: str, baixado: str, devolucao: str, retencao: str):
+def _filtrar(q, busca: str, de: str, ate: str, baixado: str, devolucao: str, retencao: str,
+             gw: str = "", portal: str = ""):
     busca = busca.strip()
     if busca:
         termo = f"%{busca}%"
@@ -140,7 +157,8 @@ def _filtrar(q, busca: str, de: str, ate: str, baixado: str, devolucao: str, ret
             q = q.filter(getattr(GdcEntrega.data, op)(datetime.date.fromisoformat(valor)))
         except ValueError:
             pass
-    for valor, coluna in ((baixado, GdcEntrega.manifesto_baixado), (devolucao, GdcEntrega.devolucao),
+    for valor, coluna in ((baixado, GdcEntrega.manifesto_baixado), (gw, GdcEntrega.baixa_gw),
+                          (portal, GdcEntrega.baixa_portal), (devolucao, GdcEntrega.devolucao),
                           (retencao, GdcEntrega.retencao_palets)):
         if _sim_nao(valor) is not None:
             q = q.filter(coluna.is_(_sim_nao(valor)))
@@ -154,8 +172,7 @@ def _validar(payload: dict) -> tuple[dict | None, str | None]:
     dados = {
         "guia": texto("guia", 40), "destinatario": texto("destinatario", 200), "cidade": texto("cidade", 120),
         "manifesto": texto("manifesto", 40), "observacao": str(payload.get("observacao") or "").strip()[:4000],
-        "manifesto_baixado": bool(payload.get("manifesto_baixado")), "devolucao": bool(payload.get("devolucao")),
-        "retencao_palets": bool(payload.get("retencao_palets")),
+        "devolucao": bool(payload.get("devolucao")), "retencao_palets": bool(payload.get("retencao_palets")),
     }
     # NFD e a observação da devolução só valem quando houve devolução.
     dados["nfd"] = texto("nfd", 60) if dados["devolucao"] else ""
@@ -168,6 +185,13 @@ def _validar(payload: dict) -> tuple[dict | None, str | None]:
         dados["data"] = datetime.date.fromisoformat(str(payload.get("data") or ""))
     except ValueError:
         return None, "Informe a data."
+    for coluna, coluna_data, nome in BAIXAS:
+        dados[coluna], dados[coluna_data] = bool(payload.get(coluna)), None
+        if dados[coluna]:
+            try:
+                dados[coluna_data] = datetime.date.fromisoformat(str(payload.get(coluna_data) or ""))
+            except ValueError:
+                return None, f"{nome}: informe a data da baixa."
     try:
         dados["qtd_palets"] = int(payload.get("qtd_palets") or 0) if dados["retencao_palets"] else 0
     except (TypeError, ValueError):
@@ -203,15 +227,15 @@ def _conta(condicao):
 
 @router.get("/api/gdc", dependencies=[Depends(require_acesso_completo_api)])
 def api_gdc_lista(busca: str = "", de: str = "", ate: str = "", baixado: str = "", devolucao: str = "",
-                  retencao: str = "", pagina: int = 1, db: Session = Depends(get_gdc_db)):
-    q = _filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao)
+                  retencao: str = "", gw: str = "", portal: str = "", pagina: int = 1, db: Session = Depends(get_gdc_db)):
+    q = _filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao, gw, portal)
     total, nao_baixados, devolucoes, retencoes, palets = _filtrar(db.query(
         func.count(GdcEntrega.id),
         _conta(GdcEntrega.manifesto_baixado.is_(False)),
         _conta(GdcEntrega.devolucao.is_(True)),
         _conta(GdcEntrega.retencao_palets.is_(True)),
         func.coalesce(func.sum(GdcEntrega.qtd_palets), 0),
-    ), busca, de, ate, baixado, devolucao, retencao).one()
+    ), busca, de, ate, baixado, devolucao, retencao, gw, portal).one()
     pagina = max(1, pagina)
     itens = (q.options(selectinload(GdcEntrega.notas))
              .order_by(GdcEntrega.data.desc(), GdcEntrega.id.desc())
@@ -270,15 +294,17 @@ def api_gdc_excluir(entrega_id: int, db: Session = Depends(get_gdc_db)):
 
 @router.get("/api/gdc/exportar", dependencies=[Depends(require_acesso_completo_api)])
 def api_gdc_exportar(busca: str = "", de: str = "", ate: str = "", baixado: str = "", devolucao: str = "",
-                     retencao: str = "", db: Session = Depends(get_gdc_db)):
-    itens = (_filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao)
+                     retencao: str = "", gw: str = "", portal: str = "", db: Session = Depends(get_gdc_db)):
+    itens = (_filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao, gw, portal)
              .options(selectinload(GdcEntrega.notas))
              .order_by(GdcEntrega.data.desc(), GdcEntrega.id.desc()).all())
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Controle GDC"
     cabecalho = ["Data", "Guia", "Notas fiscais", "Destinatário", "Cidade", "Manifesto", "Manifesto baixado",
-                 "Devolução", "NFD", "Obs. da devolução", "Retenção de paletes", "Qtd. paletes", "Observação", "Lançado por", "Lançado em"]
+                 "Data da baixa", "Baixa no GW", "Data baixa GW", "Baixa portal GDC", "Data baixa portal",
+                 "Devolução", "NFD", "Obs. da devolução", "Retenção de paletes", "Qtd. paletes",
+                 "Observação", "Lançado por", "Lançado em"]
     ws.append(cabecalho)
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
@@ -286,11 +312,14 @@ def api_gdc_exportar(busca: str = "", de: str = "", ate: str = "", baixado: str 
     sn = {True: "Sim", False: "Não"}
     for e in itens:
         ws.append([e.data, e.guia, ", ".join(n.numero for n in e.notas), e.destinatario, e.cidade, e.manifesto,
-                   sn[e.manifesto_baixado], sn[e.devolucao], e.nfd, e.obs_devolucao, sn[e.retencao_palets], e.qtd_palets or None,
-                   e.observacao, e.criado_por, e.criado_em])
-        ws.cell(ws.max_row, 1).number_format = "DD/MM/YYYY"
-        ws.cell(ws.max_row, 15).number_format = "DD/MM/YYYY HH:MM"
-    for letra, largura in zip("ABCDEFGHIJKLMNO", (12, 14, 26, 36, 22, 14, 10, 10, 14, 40, 10, 10, 50, 20, 17)):
+                   sn[e.manifesto_baixado], e.data_baixa, sn[e.baixa_gw], e.data_baixa_gw,
+                   sn[e.baixa_portal], e.data_baixa_portal, sn[e.devolucao], e.nfd, e.obs_devolucao,
+                   sn[e.retencao_palets], e.qtd_palets or None, e.observacao, e.criado_por, e.criado_em])
+        for col in (1, 8, 10, 12):
+            ws.cell(ws.max_row, col).number_format = "DD/MM/YYYY"
+        ws.cell(ws.max_row, 20).number_format = "DD/MM/YYYY HH:MM"
+    larguras = (12, 14, 26, 36, 22, 14, 10, 12, 10, 12, 10, 12, 10, 14, 40, 10, 10, 50, 20, 17)
+    for letra, largura in zip("ABCDEFGHIJKLMNOPQRST", larguras):
         ws.column_dimensions[letra].width = largura
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions

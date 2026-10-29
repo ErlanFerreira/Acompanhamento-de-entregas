@@ -16,7 +16,13 @@
 
   const $ = id => document.getElementById(id);
   const modal = $("gdc-modal");
-  const FILTROS = ["busca", "de", "ate", "baixado", "devolucao", "retencao"];
+  const FILTROS = ["busca", "de", "ate", "baixado", "gw", "portal", "devolucao", "retencao"];
+  // As baixas (sim/não + data quando sim): id no formulário, campo e campo da data na API.
+  const BAIXAS = [
+    { id: "baixado", campo: "manifesto_baixado", data: "data_baixa" },
+    { id: "gw", campo: "baixa_gw", data: "data_baixa_gw" },
+    { id: "portal", campo: "baixa_portal", data: "data_baixa_portal" },
+  ];
 
   let itens = [];
   let pagina = 1;
@@ -49,7 +55,7 @@
       itens = r.itens;
       render(r);
     } catch (e) {
-      $("gdc-body").innerHTML = '<tr><td colspan="11"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
+      $("gdc-body").innerHTML = '<tr><td colspan="13"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
     }
   }
 
@@ -83,7 +89,7 @@
     const tbody = $("gdc-body");
     if (!itens.length) {
       const filtrado = [...parametros().keys()].length;
-      tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state">' +
+      tbody.innerHTML = '<tr><td colspan="13"><div class="empty-state">' +
         (filtrado ? "Nenhum lançamento com esses filtros." : 'Nenhuma entrega lançada ainda. Clique em "+ Nova entrega".') + '</div></td></tr>';
       return;
     }
@@ -95,7 +101,8 @@
       '<td>' + esc(e.destinatario) + '</td>' +
       '<td>' + esc(e.cidade) + '</td>' +
       '<td class="num">' + (e.manifesto ? esc(e.manifesto) : '<span class="bip-muted">—</span>') + '</td>' +
-      '<td>' + simNao(e.manifesto_baixado, false) + '</td>' +
+      BAIXAS.map(b => '<td class="gdc-nowrap">' + simNao(e[b.campo], false) +
+        (e[b.data] ? ' <span class="gdc-nfd">' + fmtData(e[b.data]) + '</span>' : "") + '</td>').join("") +
       '<td>' + devolucao(e) + '</td>' +
       '<td>' + (e.retencao_palets ? '<span class="bip-tag gdc-ruim">' + fmtN(e.qtd_palets) + '</span>' : '<span class="bip-tag gdc-neutro">Não</span>') + '</td>' +
       '<td class="gdc-obs" title="' + esc(e.observacao) + '">' + esc(e.observacao) + '</td>' +
@@ -149,6 +156,13 @@
     if (ret && !$("g-qtd").value) $("g-qtd").focus();
   }
 
+  // Ao marcar uma baixa como "Sim", a data já vem com hoje (dá pra trocar).
+  function atualizarBaixa(b) {
+    const sim = marcado("g-" + b.id);
+    $("g-" + b.id + "-wrap").hidden = !sim;
+    if (sim && !$("g-" + b.id + "-data").value) $("g-" + b.id + "-data").value = hojeIso();
+  }
+
   function atualizarDevolucao() {
     const dev = marcado("g-devolucao");
     $("g-dev-wrap").hidden = !dev;
@@ -165,9 +179,13 @@
     $("g-manifesto").value = e ? e.manifesto : "";
     $("g-obs").value = e ? e.observacao : "";
     $("g-qtd").value = e && e.qtd_palets ? e.qtd_palets : "";
+    BAIXAS.forEach(b => {
+      marcar("g-" + b.id, e && e[b.campo]);
+      $("g-" + b.id + "-data").value = e && e[b.data] ? e[b.data] : "";
+      $("g-" + b.id + "-wrap").hidden = !(e && e[b.campo]);
+    });
     $("g-nfd").value = e ? e.nfd : "";
     $("g-obs-dev").value = e ? e.obs_devolucao : "";
-    marcar("g-baixado", e && e.manifesto_baixado);
     marcar("g-devolucao", e && e.devolucao);
     marcar("g-retencao", e && e.retencao_palets);
     $("g-qtd-wrap").hidden = !(e && e.retencao_palets);
@@ -196,11 +214,11 @@
       guia: $("g-guia").value, data: $("g-data").value, destinatario: $("g-destinatario").value,
       cidade: $("g-cidade").value, manifesto: $("g-manifesto").value, observacao: $("g-obs").value,
       notas: [...$("g-notas").querySelectorAll("input")].map(i => i.value.trim()).filter(Boolean),
-      manifesto_baixado: marcado("g-baixado"), devolucao: marcado("g-devolucao"),
-      nfd: $("g-nfd").value, obs_devolucao: $("g-obs-dev").value,
+      devolucao: marcado("g-devolucao"), nfd: $("g-nfd").value, obs_devolucao: $("g-obs-dev").value,
       retencao_palets: marcado("g-retencao"), qtd_palets: $("g-qtd").value,
       confirmar_repetida: !!confirmarRepetida,
     };
+    BAIXAS.forEach(b => { payload[b.campo] = marcado("g-" + b.id); payload[b.data] = $("g-" + b.id + "-data").value; });
     const botao = $("gdc-salvar");
     botao.disabled = true;
     try {
@@ -227,6 +245,7 @@
   $("gdc-form").addEventListener("submit", salvar);
   $("g-add-nota").addEventListener("click", () => addNota("").querySelector("input").focus());
   document.querySelectorAll('input[name="g-retencao"]').forEach(r => r.addEventListener("change", atualizarQtd));
+  BAIXAS.forEach(b => document.querySelectorAll('input[name="g-' + b.id + '"]').forEach(r => r.addEventListener("change", () => atualizarBaixa(b))));
   document.querySelectorAll('input[name="g-devolucao"]').forEach(r => r.addEventListener("change", atualizarDevolucao));
   modal.addEventListener("click", ev => { if (ev.target === modal) fechar(); });
   document.addEventListener("keydown", ev => { if (ev.key === "Escape" && !modal.hidden) fechar(); });
@@ -234,7 +253,7 @@
   let espera = null;
   function filtrar() { pagina = 1; carregar(); }
   $("f-busca").addEventListener("input", () => { clearTimeout(espera); espera = setTimeout(filtrar, 300); });
-  ["de", "ate", "baixado", "devolucao", "retencao"].forEach(f => $("f-" + f).addEventListener("change", filtrar));
+  FILTROS.slice(1).forEach(f => $("f-" + f).addEventListener("change", filtrar));
   $("f-limpar").addEventListener("click", () => { FILTROS.forEach(f => { $("f-" + f).value = ""; }); filtrar(); });
   document.querySelectorAll("[data-filtro]").forEach(b => b.addEventListener("click", () => {
     const sel = $("f-" + b.dataset.filtro);

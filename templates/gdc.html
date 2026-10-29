@@ -30,6 +30,10 @@
     <div class="filter-group"><span class="filter-label">Até</span><input type="date" id="f-ate"></div>
     <div class="filter-group"><span class="filter-label">Manifesto baixado</span>
       <select id="f-baixado"><option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option></select></div>
+    <div class="filter-group"><span class="filter-label">Baixa GW</span>
+      <select id="f-gw"><option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option></select></div>
+    <div class="filter-group"><span class="filter-label">Baixa portal GDC</span>
+      <select id="f-portal"><option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option></select></div>
     <div class="filter-group"><span class="filter-label">Devolução</span>
       <select id="f-devolucao"><option value="">Todos</option><option value="sim">Sim</option><option value="nao">Não</option></select></div>
     <div class="filter-group"><span class="filter-label">Retenção</span>
@@ -48,9 +52,9 @@
     <div class="table-scroll gdc-scroll">
       <table class="detail">
         <thead>
-          <tr><th>Data</th><th>Guia</th><th>Notas fiscais</th><th>Destinatário</th><th>Cidade</th><th>Manifesto</th><th>Baixado</th><th>Devolução</th><th>Paletes retidos</th><th>Observação</th><th></th></tr>
+          <tr><th>Data</th><th>Guia</th><th>Notas fiscais</th><th>Destinatário</th><th>Cidade</th><th>Manifesto</th><th>Manifesto baixado</th><th>Baixa GW</th><th>Baixa portal GDC</th><th>Devolução</th><th>Paletes retidos</th><th>Observação</th><th></th></tr>
         </thead>
-        <tbody id="gdc-body"><tr><td colspan="11"><div class="empty-state">Carregando…</div></td></tr></tbody>
+        <tbody id="gdc-body"><tr><td colspan="13"><div class="empty-state">Carregando…</div></td></tr></tbody>
       </table>
     </div>
     <div class="pagination" id="gdc-paginacao" hidden>
@@ -83,7 +87,16 @@
     <div class="gdc-simnao">
       <div class="gdc-pergunta"><span>Manifesto baixado?</span>
         <label><input type="radio" name="g-baixado" value="sim"> Sim</label>
-        <label><input type="radio" name="g-baixado" value="nao" checked> Não</label></div>
+        <label><input type="radio" name="g-baixado" value="nao" checked> Não</label>
+        <label class="gdc-qtd" id="g-baixado-wrap" hidden>Data da baixa <input type="date" id="g-baixado-data"></label></div>
+      <div class="gdc-pergunta"><span>Baixa no GW?</span>
+        <label><input type="radio" name="g-gw" value="sim"> Sim</label>
+        <label><input type="radio" name="g-gw" value="nao" checked> Não</label>
+        <label class="gdc-qtd" id="g-gw-wrap" hidden>Data da baixa <input type="date" id="g-gw-data"></label></div>
+      <div class="gdc-pergunta"><span>Baixa no portal GDC?</span>
+        <label><input type="radio" name="g-portal" value="sim"> Sim</label>
+        <label><input type="radio" name="g-portal" value="nao" checked> Não</label>
+        <label class="gdc-qtd" id="g-portal-wrap" hidden>Data da baixa <input type="date" id="g-portal-data"></label></div>
       <div class="gdc-pergunta"><span>Houve devolução?</span>
         <label><input type="radio" name="g-devolucao" value="sim"> Sim</label>
         <label><input type="radio" name="g-devolucao" value="nao" checked> Não</label></div>
