@@ -31,8 +31,14 @@ def main():
     init_db_and_seed()  # garante a coluna usuarios.email e as tabelas do histórico
     db = SessionLocal()
     try:
-        for linha in executar(db, login=args.login or None, dry_run=args.dry_run, saida=args.saida):
+        linhas = executar(db, login=args.login or None, dry_run=args.dry_run, saida=args.saida)
+        for linha in linhas:
             print(linha)
+        # ninguém recebeu nada: falha o job (o GitHub avisa o dono por e-mail) em vez de
+        # terminar "verde" e o resumo simplesmente não chegar
+        if not args.dry_run and not any(">" in l and "não enviado" not in l for l in linhas):
+            print("::error::Resumo diário não enviado a ninguém: cadastre o e-mail dos analistas na tela Usuários.")
+            sys.exit(1)
     finally:
         db.close()
 
