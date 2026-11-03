@@ -4,10 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trocar senha — Painel de Entregas</title>
+<link rel="icon" href="/static/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/img/favicon-192.png">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Lato:wght@400;700&family=Roboto:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/marca.css">
 </head>
 <body class="login-body">
   <form class="login-card" method="post" action="/trocar-senha">
+    <div class="login-logo"><img src="/static/img/logo-vertical.png" alt="Grupo Transrota"></div>
     {% if obrigatoria %}
     <h1>Defina sua senha</h1>
     <p class="login-sub">Olá, {{ analista.nome }}. Antes de continuar, troque a senha provisória que você recebeu por uma só sua.</p>

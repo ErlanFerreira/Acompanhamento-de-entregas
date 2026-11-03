@@ -226,13 +226,17 @@ def renderizar(usuario: Usuario, dados: dict, hoje: datetime.date) -> tuple[str,
     botao = ('display:inline-block;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;')
     corpo = (
         '<div style="font-family:Segoe UI,Arial,sans-serif;max-width:680px;margin:0 auto;color:#1b2430;">'
-        f'<h2 style="margin:0 0 4px;font-size:20px;">Bom dia, {e(primeiro_nome)}!</h2>'
+        # faixa azul com o logotipo (versão negativa) -- identidade visual do Grupo Transrota
+        f'<div style="background:#0a1a5c;padding:14px 18px;border-bottom:4px solid #ffd400;margin-bottom:18px;">'
+        f'<img src="{e(url)}/static/img/logo-horizontal-negativo.png" alt="Grupo Transrota" width="170" '
+        f'style="display:block;border:0;height:auto;"></div>'
+        f'<h2 style="margin:0 0 4px;font-size:20px;color:#0a1a5c;">Bom dia, {e(primeiro_nome)}!</h2>'
         f'<div style="color:#5a6472;font-size:13px;margin-bottom:16px;">Resumo das entregas das suas empresas em {hoje.strftime("%d/%m/%Y")}'
         ' · CT-e do período sincronizado (até 90 dias)</div>'
         f'<table cellspacing="8" cellpadding="0" style="width:100%;border-collapse:separate;"><tr>{"".join(cards)}</tr></table>'
         f'<table cellspacing="8" cellpadding="0" style="width:100%;border-collapse:separate;margin-top:-4px;"><tr>{"".join(cards_logistica)}</tr></table>'
         f'{tabela_atrasados}{tabela_tomadores}'
-        f'<p style="margin:24px 0 8px;"><a href="{e(link_venc)}" style="{botao}background:#c9352f;color:#fff;">Ver vencidas no Painel</a> '
+        f'<p style="margin:24px 0 8px;"><a href="{e(link_venc)}" style="{botao}background:#0a1a5c;color:#fff;">Ver vencidas no Painel</a> '
         f'<a href="{e(link_pend)}" style="{botao}background:#eef0f3;color:#1b2430;">Todas as pendentes</a></p>'
         '<p style="color:#7a8594;font-size:11px;">Você recebe este resumo porque tem e-mail cadastrado na tela Usuários do Painel de Entregas.</p>'
         '</div>'
