@@ -8,17 +8,15 @@ Sem a variável, as tabelas ficam no banco principal (e a tela avisa).
 """
 
 import datetime
-import io
 import os
 
-import openpyxl
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-from openpyxl.styles import Font, PatternFill
+from fastapi.responses import JSONResponse
 from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, case, func, inspect, or_, text
 from sqlalchemy.orm import Session, declarative_base, relationship, selectinload, sessionmaker
 
 from . import db as banco
+from .planilha_marca import Coluna, criar_planilha, resposta_xlsx
 from .security import require_acesso_completo_api, usuario_logado
 
 _url_gdc = banco._url(os.environ.get("GDC_DATABASE_URL", "").strip())
@@ -298,34 +296,31 @@ def api_gdc_exportar(busca: str = "", de: str = "", ate: str = "", baixado: str 
     itens = (_filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao, gw, portal)
              .options(selectinload(GdcEntrega.notas))
              .order_by(GdcEntrega.data.desc(), GdcEntrega.id.desc()).all())
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Controle GDC"
-    cabecalho = ["Data", "Guia", "Notas fiscais", "Destinatário", "Cidade", "Manifesto", "Manifesto baixado",
-                 "Data da baixa", "Baixa no GW", "Data baixa GW", "Baixa portal GDC", "Data baixa portal",
-                 "Devolução", "NFD", "Obs. da devolução", "Retenção de paletes", "Qtd. paletes",
-                 "Observação", "Lançado por", "Lançado em"]
-    ws.append(cabecalho)
-    for c in ws[1]:
-        c.font = Font(bold=True, color="FFFFFF")
-        c.fill = PatternFill("solid", fgColor="2A78D6")
     sn = {True: "Sim", False: "Não"}
-    for e in itens:
-        ws.append([e.data, e.guia, ", ".join(n.numero for n in e.notas), e.destinatario, e.cidade, e.manifesto,
-                   sn[e.manifesto_baixado], e.data_baixa, sn[e.baixa_gw], e.data_baixa_gw,
-                   sn[e.baixa_portal], e.data_baixa_portal, sn[e.devolucao], e.nfd, e.obs_devolucao,
-                   sn[e.retencao_palets], e.qtd_palets or None, e.observacao, e.criado_por, e.criado_em])
-        for col in (1, 8, 10, 12):
-            ws.cell(ws.max_row, col).number_format = "DD/MM/YYYY"
-        ws.cell(ws.max_row, 20).number_format = "DD/MM/YYYY HH:MM"
-    larguras = (12, 14, 26, 36, 22, 14, 10, 12, 10, 12, 10, 12, 10, 14, 40, 10, 10, 50, 20, 17)
-    for letra, largura in zip("ABCDEFGHIJKLMNOPQRST", larguras):
-        ws.column_dimensions[letra].width = largura
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    nome = f"controle_gdc_{datetime.datetime.now(BRASILIA):%Y-%m-%d}.xlsx"
-    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                             headers={"Content-Disposition": f'attachment; filename="{nome}"'})
+    cores_sn = {"Sim": "2E7D32"}
+    colunas = [
+        Coluna("Data", 12, "data"), Coluna("Guia", 14), Coluna("Notas fiscais", 26), Coluna("Destinatário", 36),
+        Coluna("Cidade", 22), Coluna("Manifesto", 14), Coluna("Manifesto baixado", 12, "centro", cores=cores_sn),
+        Coluna("Data da baixa", 12, "data"), Coluna("Baixa no GW", 11, "centro", cores=cores_sn),
+        Coluna("Data baixa GW", 12, "data"), Coluna("Baixa portal GDC", 12, "centro", cores=cores_sn),
+        Coluna("Data baixa portal", 12, "data"), Coluna("Devolução", 11, "centro"), Coluna("NFD", 14),
+        Coluna("Obs. da devolução", 40), Coluna("Retenção de paletes", 12, "centro"),
+        Coluna("Qtd. paletes", 10, "inteiro", total=True), Coluna("Observação", 50), Coluna("Lançado por", 20),
+        Coluna("Lançado em", 17, "datahora"),
+    ]
+    linhas = [[e.data, e.guia, ", ".join(n.numero for n in e.notas), e.destinatario, e.cidade, e.manifesto,
+               sn[e.manifesto_baixado], e.data_baixa, sn[e.baixa_gw], e.data_baixa_gw,
+               sn[e.baixa_portal], e.data_baixa_portal, sn[e.devolucao], e.nfd, e.obs_devolucao,
+               sn[e.retencao_palets], e.qtd_palets or None, e.observacao, e.criado_por, e.criado_em]
+              for e in itens]
+    info = [("Registros:", str(len(itens))), ("Período:", _periodo_texto(de, ate)),
+            ("Gerado em:", datetime.datetime.now(BRASILIA).date())]
+    conteudo = criar_planilha("Controle GDC", "Entregas da operação GDC", colunas, linhas, info=info, aba="Controle GDC")
+    return resposta_xlsx(conteudo, f"controle_gdc_{datetime.datetime.now(BRASILIA):%Y-%m-%d}.xlsx")
+
+
+def _periodo_texto(de: str, ate: str) -> str:
+    fmt = lambda v: f"{v[8:10]}/{v[5:7]}/{v[:4]}" if len(v or "") >= 10 else ""
+    if de and ate:
+        return f"{fmt(de)} a {fmt(ate)}"
+    return f"desde {fmt(de)}" if de else (f"até {fmt(ate)}" if ate else "todo o histórico")

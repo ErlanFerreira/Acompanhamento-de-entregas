@@ -525,6 +525,30 @@
     document.getElementById("vl-export").addEventListener("click", () => {
       const v = vistaAberta();
       if (!v) return;
+      const dadosXlsx = {
+        nome: "painel_" + v.chave,
+        titulo: v.rotulo,
+        subtitulo: "Painel de Entregas" + (v.extra ? " · " + v.extra.rotulo + ": " + v.extra.texto : ""),
+        info: [["Registros:", String(vlLinhas.length)]],
+        colunas: [
+          { t: "Tomador", w: 32 }, { t: "CT-e", w: 12 }, { t: "Série", w: 7, tipo: "centro" }, { t: "Notas fiscais", w: 22 },
+          { t: "Emissão", w: 12, tipo: "data" }, { t: "Destinatário", w: 32 }, { t: "Cidade", w: 20 }, { t: "UF", w: 6, tipo: "centro" },
+          { t: "Entrega", w: 12, tipo: "data" }, { t: "Status", w: 12, tipo: "centro", cores: { "No prazo": "2E7D32", "Pendente": "B36B00", "Vencido": "C62828", "Atrasado": "B36B00" } },
+          { t: "Dias", w: 8, tipo: "inteiro" }, { t: "Previsão", w: 12, tipo: "data" }, { t: "Ocorrência", w: 36 },
+          { t: "Manifesto", w: 11, tipo: "centro" }, { t: "Romaneio", w: 11, tipo: "centro" },
+          { t: "Situação logística", w: 17, tipo: "centro", cores: { "Em rota": "2E7D32", "Em depósito": "B36B00" } },
+          { t: "Parado há (dias)", w: 12, tipo: "inteiro" }
+        ],
+        linhas: vlLinhas.map(r => [
+          r.consignatario || "", r.cte, r.serie || "", r.notas_fiscais || "", r.emissao || "", r.destinatario || "",
+          r.cidade_dest || "", r.uf_dest || "", r.data_baixa || "", STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso,
+          r.previsao || "", r.ocorrencia || "", r.manifesto ? "Sim" : "Não", r.romaneio ? "Sim" : "Não",
+          emRota(r) ? "Em rota" : emDeposito(r) ? "Em depósito" : "", emDeposito(r) && diasParado(r) != null ? diasParado(r) : ""
+        ])
+      };
+      baixarPlanilha(dadosXlsx, () => exportarCsvLista(v));
+    });
+    function exportarCsvLista(v) {
       const lines = [["Tomador", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio", "Situacao logistica", "Parado ha (dias)"].join(";")];
       vlLinhas.forEach(r => {
         lines.push([
@@ -540,7 +564,7 @@
       a.href = url; a.download = "painel_" + v.chave + ".csv";
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    });
+    }
     window.addEventListener("hashchange", rotear);
 
     function renderBarChart(containerId, items, opts) {
@@ -850,6 +874,24 @@
 
     function exportCsv() {
       const rows = window._currentTableData || [];
+      baixarPlanilha({
+        nome: "pendencias_filtrado",
+        titulo: "Pendências de entrega",
+        subtitulo: "Painel de Entregas · tabela filtrada",
+        info: [["Registros:", String(rows.length)]],
+        colunas: [
+          { t: "CT-e", w: 12 }, { t: "Emissão", w: 12, tipo: "data" }, { t: "Tomador", w: 32 }, { t: "Destinatário", w: 32 },
+          { t: "Cidade", w: 20 }, { t: "UF", w: 6, tipo: "centro" }, { t: "Status", w: 12, tipo: "centro", cores: { "No prazo": "2E7D32", "Pendente": "B36B00", "Vencido": "C62828", "Atrasado": "B36B00" } },
+          { t: "Dias", w: 8, tipo: "inteiro" }, { t: "Ocorrência", w: 36 }, { t: "Manifesto", w: 11, tipo: "centro" }, { t: "Romaneio", w: 11, tipo: "centro" }
+        ],
+        linhas: rows.map(r => [
+          r.cte, r.emissao || "", r.consignatario || "", r.destinatario || "", r.cidade_dest || "", r.uf_dest || "",
+          STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso, r.ocorrencia || "",
+          r.manifesto ? "Sim" : "Não", r.romaneio ? "Sim" : "Não"
+        ])
+      }, () => exportarCsvTabela(rows));
+    }
+    function exportarCsvTabela(rows) {
       const headers = ["CT-e", "Emissao", "Tomador", "Destinatario", "Cidade", "UF", "Status", "Dias", "Ocorrencia", "Manifesto", "Romaneio"];
       const lines = [headers.join(";")];
       rows.forEach(r => {

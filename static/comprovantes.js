@@ -1025,6 +1025,31 @@
     });
     document.getElementById("vp-export").addEventListener("click", () => {
       const v = vistaAberta();
+      baixarPlanilha({
+        nome: "comprovantes_" + v.id.replace("/", "_"),
+        titulo: "Controle de comprovantes",
+        subtitulo: v.titulo,
+        info: [["Registros:", String(vpLinhas.length)]],
+        colunas: [
+          { t: "Cliente", w: 32 }, { t: "CT-e", w: 12 }, { t: "Série", w: 7, tipo: "centro" }, { t: "Notas fiscais", w: 22 },
+          { t: "Emissão", w: 12, tipo: "data" }, { t: "Destinatário", w: 32 }, { t: "Cidade", w: 20 }, { t: "UF", w: 6, tipo: "centro" },
+          { t: "Entrega", w: 12, tipo: "data" }, { t: "Data comprovante", w: 12, tipo: "data" },
+          { t: "Situação", w: 22, tipo: "centro", cores: { "Com comprovante": "2E7D32", "Entregue sem comprovante": "C62828", "Ainda não entregue": "B36B00" } },
+          { t: "Prazo (dias úteis)", w: 11, tipo: "inteiro" }, { t: "Vencimento", w: 12, tipo: "data" },
+          { t: "Alerta", w: 11, tipo: "centro", cores: { "No prazo": "2E7D32", "Alerta": "B36B00", "Vencido": "C62828", "Crítico": "C62828" } },
+          { t: "Detalhe do prazo", w: 30 }, { t: "Tratativa", w: 14, tipo: "centro", cores: { "Resolvido": "2E7D32", "Em andamento": "B36B00" } },
+          { t: "Última tratativa", w: 40 }, { t: "Responsável", w: 18 }, { t: "Data da tratativa", w: 16, tipo: "centro" }
+        ],
+        linhas: vpLinhas.map(r => {
+          const t = ultimaTrat(r.id_cte);
+          return [r.consignatario, r.cte, r.serie || "", r.notas_fiscais || "", r.emissao || "", r.destinatario, r.cidade_dest || "", r.uf_dest || "",
+            r.data_baixa || "", r.data_comprovante || "", ROTULO[r.situacao],
+            r.situacao === "falta_entregue" ? r.prazo_comprovante_dias : "", r.vencimento || "", ROTULO_ALERTA[r.alerta] || "", textoPrazo(r),
+            t ? ROTULO_TRAT[t.situacao] : "", t ? t.texto : "", t ? t.responsavel || "" : "", t ? fmtDataHora(t.criado_em) : ""];
+        })
+      }, () => exportarCsvComprovantes(v));
+    });
+    function exportarCsvComprovantes(v) {
       const lines = [["Cliente", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Data comprovante", "Situacao",
         "Prazo (dias uteis)", "Vencimento", "Alerta", "Detalhe do prazo", "Tratativa", "Ultima tratativa", "Responsavel", "Data da tratativa"].join(";")];
       vpLinhas.forEach(r => {
@@ -1036,7 +1061,7 @@
           t ? fmtDataHora(t.criado_em) : ""].join(";"));
       });
       baixarCsv(lines, "comprovantes_" + v.id.replace("/", "_") + ".csv");
-    });
+    }
 
     function render() {
       const recorte = getRecorte();

@@ -22,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from . import chave_cte, config, relatorios_bipagem, tipos_cte
-from . import bloqueio_login, escopo, gdc, historico
+from . import bloqueio_login, escopo, gdc, historico, planilha_marca
 from .logistica import classificar as classificar_logistica
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
@@ -77,6 +77,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(historico.router)
 app.include_router(gdc.router)
+app.include_router(planilha_marca.router)
 
 
 @app.exception_handler(SQLAlchemyError)
@@ -1219,31 +1220,29 @@ _COLUNAS_BIPAGEM = [
 def api_bipagem_exportar(request: Request, payload: dict, db: Session = Depends(get_db)):
     leituras = [str(x) for x in (payload.get("leituras") or [])][:2000]
     empresas = escopo_empresas(request)
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Bipagem"
-    ws.append([titulo for titulo, _ in _COLUNAS_BIPAGEM])
+    linhas = []
     for leitura in leituras:
         r = _resultado_bipagem(db, leitura, empresas)
         if not r["ok"]:
             linha = [None] * len(_COLUNAS_BIPAGEM)
             linha[0], linha[-2], linha[-1] = leitura, r["erro"], "Não"
-            ws.append(linha)
+            linhas.append(linha)
             continue
         linha = []
         for _, campo in _COLUNAS_BIPAGEM:
             v = r.get(campo)
             linha.append(("Sim" if v else "Não") if campo == "encontrado" else v)
-        ws.append(linha)
-    for col, largura in zip("ABCDEFGHIJKLMN", (48, 8, 10, 7, 20, 18, 16, 12, 34, 34, 20, 5, 8, 9)):
-        ws.column_dimensions[col].width = largura
-    # Chave como texto -- senão o Excel mostra em notação científica.
-    for (celula,) in ws.iter_rows(min_row=2, min_col=1, max_col=1):
-        celula.number_format = "@"
-
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    return _xlsx_response(buffer.getvalue(), f"bipagem_{datetime.date.today().isoformat()}.xlsx")
+        linhas.append(linha)
+    # Chave como texto ("texto" no builder) -- senão o Excel mostra em notação científica.
+    larguras = (48, 8, 10, 7, 20, 18, 16, 12, 34, 34, 20, 5, 8, 9)
+    tipos = ("texto", "centro", "texto", "centro", "texto", "texto", "texto", "data", "texto", "texto",
+             "texto", "centro", "centro", "centro")
+    colunas = [planilha_marca.Coluna(titulo, w, t, cores={"Sim": "2E7D32", "Não": "C62828"} if campo == "encontrado" else {})
+               for (titulo, campo), w, t in zip(_COLUNAS_BIPAGEM, larguras, tipos)]
+    conteudo = planilha_marca.criar_planilha(
+        "Bipagem de CT-e", "Conferência por leitura da chave de acesso", colunas, linhas,
+        info=[("Leituras:", str(len(leituras))), ("Gerado em:", datetime.date.today())], aba="Bipagem")
+    return _xlsx_response(conteudo, f"bipagem_{datetime.date.today().isoformat()}.xlsx")
 
 
 # --------------------------------------------------- consulta de notas ----
