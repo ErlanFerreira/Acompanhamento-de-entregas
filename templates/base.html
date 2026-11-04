@@ -20,14 +20,13 @@
   <aside class="sidebar">
     <a href="/painel" class="sidebar-brand" title="Grupo Transrota"><img src="/static/img/logo-horizontal-negativo.png" alt="Grupo Transrota" width="172"></a>
     <nav>
-      <a href="/painel" class="nav-link {{ 'active' if active == 'painel' else '' }}">Painel</a>
-      <a href="/historico" class="nav-link {{ 'active' if active == 'historico' else '' }}">Histórico</a>
-      {% if tem_acesso_completo(request) %}
-      <a href="/comprovantes" class="nav-link {{ 'active' if active == 'comprovantes' else '' }}">Comprovantes</a>
-      <a href="/gdc" class="nav-link {{ 'active' if active == 'gdc' else '' }}">Controle GDC</a>
-      {% endif %}
-      <a href="/consultas" class="nav-link {{ 'active' if active == 'consultas' else '' }}">Consulta de Notas</a>
-      <a href="/bipagem" class="nav-link {{ 'active' if active == 'bipagem' else '' }}">Emissão de Protocolo</a>
+      {% if pode_ver_tela(request, 'painel') %}<a href="/painel" class="nav-link {{ 'active' if active == 'painel' else '' }}">Painel</a>{% endif %}
+      {% if pode_ver_tela(request, 'historico') %}<a href="/historico" class="nav-link {{ 'active' if active == 'historico' else '' }}">Histórico</a>{% endif %}
+      {% if pode_ver_tela(request, 'comprovantes') %}<a href="/comprovantes" class="nav-link {{ 'active' if active == 'comprovantes' else '' }}">Comprovantes</a>{% endif %}
+      {% if pode_ver_tela(request, 'gdc') %}<a href="/gdc" class="nav-link {{ 'active' if active == 'gdc' else '' }}">Controle GDC</a>{% endif %}
+      {% if pode_ver_tela(request, 'consultas') %}<a href="/consultas" class="nav-link {{ 'active' if active == 'consultas' else '' }}">Consulta de Notas</a>{% endif %}
+      {% if pode_ver_tela(request, 'bipagem') %}<a href="/bipagem" class="nav-link {{ 'active' if active == 'bipagem' else '' }}">Emissão de Protocolo</a>{% endif %}
+      {% if pode_ver_tela(request, 'emissao') %}<a href="/emissao" class="nav-link {{ 'active' if active == 'emissao' else '' }}">Emissão de CT-e</a>{% endif %}
       {% if eh_supervisor(request) %}
       <a href="/usuarios" class="nav-link {{ 'active' if active == 'usuarios' else '' }}">Usuários</a>
       {% endif %}

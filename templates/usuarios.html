@@ -5,7 +5,7 @@
   <header class="app-header">
     <div>
       <h1>Usuários</h1>
-      <p>Logins dos analistas. Cada analista vê todas as telas, mas os CT-e (Painel, Comprovantes e tratativas) só das empresas marcadas para cada um, como tomador ou remetente. Você continua entrando com a senha geral e vendo tudo.</p>
+      <p>Logins dos analistas. Você marca quais telas cada um pode abrir; nelas, os CT-e (Painel, Comprovantes e tratativas) só das empresas marcadas para cada um, como tomador ou remetente. Você continua entrando com a senha geral e vendo tudo.</p>
     </div>
     <div style="display:flex; gap:8px; align-items:center;">
       <button class="btn-primary" id="btn-novo" type="button" style="margin:0;">+ Novo analista</button>
@@ -21,15 +21,15 @@
     <div class="table-scroll">
       <table class="detail" id="usuarios-table">
         <thead>
-          <tr><th>Nome</th><th>Login</th><th>E-mail</th><th>Empresas</th><th>Situação</th><th></th></tr>
+          <tr><th>Nome</th><th>Login</th><th>E-mail</th><th>Empresas</th><th>Telas</th><th>Situação</th><th></th></tr>
         </thead>
-        <tbody id="usuarios-body"><tr><td colspan="6"><div class="empty-state">Carregando…</div></td></tr></tbody>
+        <tbody id="usuarios-body"><tr><td colspan="7"><div class="empty-state">Carregando…</div></td></tr></tbody>
       </table>
     </div>
   </section>
 
   <footer class="app-footer">
-    <strong>Atenção</strong> — quem souber a senha geral entra como supervisor e vê todas as empresas. Se os analistas a conhecem, troque a <code>PAINEL_SENHA</code> na hospedagem depois de cadastrar os logins deles. As telas Consulta de Notas e Emissão de Protocolo não são filtradas por empresa.
+    <strong>Atenção</strong> — quem souber a senha geral entra como supervisor e vê todas as empresas. Se os analistas a conhecem, troque a <code>PAINEL_SENHA</code> na hospedagem depois de cadastrar os logins deles. As telas Consulta de Notas e Emissão de Protocolo não são filtradas por empresa. Quem entra pelo link de acesso compartilhado vê só Painel, Histórico, Consulta de Notas e Emissão de Protocolo.
   </footer>
 </div>
 
@@ -45,9 +45,15 @@
       <label><span>E-mail <span class="hint">(resumo diário; opcional)</span></span><input type="email" id="usr-email" maxlength="255" autocapitalize="off" spellcheck="false" placeholder="ex.: maria.silva@transrota.com.br"></label>
       <label><span>Senha <span class="hint" id="usr-senha-hint"></span></span><input type="password" id="usr-senha" autocomplete="new-password"></label>
       <label class="usr-ativo" id="usr-ativo-wrap"><input type="checkbox" id="usr-ativo" checked> Ativo (pode entrar)</label>
-      <label class="usr-ativo"><input type="checkbox" id="usr-sac"> Mostrar o atalho do Portal SAC no menu</label>
-      <label class="usr-ativo"><input type="checkbox" id="usr-cte"> Pode emitir CT-e (tela Emissão de CT-e)</label>
     </div>
+    <div class="comp-trat-sec">Telas liberadas <span id="usr-telas-count" class="usr-sel-count"></span>
+      <span class="usr-telas-atalhos">
+        <button type="button" class="btn" data-telas="padrao">Padrão</button>
+        <button type="button" class="btn" data-telas="todas">Todas</button>
+        <button type="button" class="btn" data-telas="nenhuma">Nenhuma</button>
+      </span>
+    </div>
+    <div class="usr-telas" id="usr-telas"></div>
     <div class="comp-trat-sec">Empresas <span id="usr-sel-count" class="usr-sel-count"></span></div>
     <div class="usr-selecionadas" id="usr-selecionadas"></div>
     <div class="usr-busca">

@@ -109,10 +109,16 @@ def _carregar_sessao(request: Request) -> dict | None:
                 return None
             if not u or not u.ativo:
                 return None
+            try:
+                telas = telas_salvas(u.telas)
+            except Exception:
+                # Coluna `telas` ainda não criada no banco: vale o que o analista já tinha.
+                db.rollback()
+                telas = None
             data["usuario"] = {
                 "id": u.id, "nome": u.nome, "login": u.login, "empresas": json.loads(u.empresas or "[]"),
                 "trocar_senha": bool(u.trocar_senha), "acesso_sac": bool(u.acesso_sac),
-                "emite_cte": bool(u.emite_cte),
+                "emite_cte": bool(u.emite_cte), "telas": telas,
             }
         finally:
             db.close()
@@ -142,22 +148,79 @@ def usuario_logado(request: Request) -> dict | None:
     return sessao.get("usuario") if sessao else None
 
 
-def pode_ver_sac(request: Request) -> bool:
-    """Atalho do portal do SAC no menu: o supervisor sempre; analista só se o
-    supervisor liberou na tela Usuários; nunca pelo link de acesso."""
-    if eh_supervisor(request):
+# Telas do menu: (chave, nome, endereço, já liberada para um analista novo).
+# O supervisor (senha geral) vê todas; o analista, as que o supervisor marcou na
+# tela Usuários; o link de acesso compartilhado, só as de TELAS_DO_LINK.
+TELAS = [
+    ("painel", "Painel", "/painel", True),
+    ("historico", "Histórico", "/historico", True),
+    ("comprovantes", "Comprovantes", "/comprovantes", True),
+    ("gdc", "Controle GDC", "/gdc", True),
+    ("consultas", "Consulta de Notas", "/consultas", True),
+    ("bipagem", "Emissão de Protocolo", "/bipagem", True),
+    ("emissao", "Emissão de CT-e", "/emissao", False),
+    ("sac", "Portal SAC", None, False),  # atalho externo no menu
+]
+TELAS_CHAVES = [t[0] for t in TELAS]
+TELAS_DO_LINK = {"painel", "historico", "consultas", "bipagem"}
+
+
+def telas_salvas(valor) -> list[str] | None:
+    """Coluna `usuarios.telas` (JSON) -> lista; None = nunca configurada."""
+    if not valor:
+        return None
+    try:
+        lista = json.loads(valor)
+    except ValueError:
+        return None
+    return [c for c in lista if c in TELAS_CHAVES] if isinstance(lista, list) else None
+
+
+def telas_do_usuario(u: dict) -> set[str]:
+    """Telas que o analista pode usar. Sem configuração salva, vale o que ele já
+    tinha antes deste controle: as telas padrão, mais Emissão de CT-e e Portal
+    SAC quando esses dois avisos antigos estavam marcados."""
+    if u.get("telas") is not None:
+        return set(u["telas"])
+    liberadas = {c for c, _, _, padrao in TELAS if padrao}
+    if u.get("emite_cte"):
+        liberadas.add("emissao")
+    if u.get("acesso_sac"):
+        liberadas.add("sac")
+    return liberadas
+
+
+def pode_ver_tela(request: Request, chave: str) -> bool:
+    sessao = _sessao(request)
+    if not sessao:
+        return False
+    if sessao.get("via") == VIA_SENHA:
         return True
-    u = usuario_logado(request)
-    return bool(u and u.get("acesso_sac") and not u.get("trocar_senha"))
+    if sessao.get("via") == VIA_USUARIO:
+        u = sessao.get("usuario")
+        return bool(u and not u.get("trocar_senha") and chave in telas_do_usuario(u))
+    return chave in TELAS_DO_LINK  # link de acesso (ou sessão antiga, sem "via")
+
+
+def url_inicial(request: Request) -> str:
+    """Primeira tela que a pessoa pode abrir (a de entrada depois do login e o
+    destino de quem tenta uma tela que não tem)."""
+    if not is_authenticated(request):
+        return "/login"
+    for chave, _, url, _ in TELAS:
+        if url and pode_ver_tela(request, chave):
+            return url
+    return "/sem-acesso"
+
+
+def pode_ver_sac(request: Request) -> bool:
+    """Atalho do portal do SAC no menu."""
+    return pode_ver_tela(request, "sac")
 
 
 def pode_emitir_cte(request: Request) -> bool:
-    """Tela "Emissão de CT-e": o supervisor sempre; analista só se o
-    supervisor liberou na tela Usuários; nunca pelo link de acesso."""
-    if eh_supervisor(request):
-        return True
-    u = usuario_logado(request)
-    return bool(u and u.get("emite_cte") and not u.get("trocar_senha"))
+    """Tela "Emissão de CT-e"."""
+    return pode_ver_tela(request, "emissao")
 
 
 def escopo_empresas(request: Request) -> set[str] | None:
@@ -189,6 +252,25 @@ def require_auth_api(request: Request):
         raise HTTPException(status_code=401, detail="Não autenticado.")
     if precisa_trocar_senha(request):
         raise HTTPException(status_code=403, detail="Troque a senha antes de continuar.")
+
+
+def exigir_tela_page(*chaves: str):
+    """Dependência de rota HTML: quem não tem nenhuma das telas volta pra
+    primeira que pode abrir, como se esta não existisse."""
+    def dep(request: Request):
+        require_auth_page(request)
+        if not any(pode_ver_tela(request, c) for c in chaves):
+            raise HTTPException(status_code=303, headers={"Location": url_inicial(request)})
+    return dep
+
+
+def exigir_tela_api(*chaves: str):
+    """Dependência de rota de API: 404 pra quem não tem nenhuma das telas."""
+    def dep(request: Request):
+        require_auth_api(request)
+        if not any(pode_ver_tela(request, c) for c in chaves):
+            raise HTTPException(status_code=404, detail="Not Found")
+    return dep
 
 
 def require_acesso_completo_api(request: Request):

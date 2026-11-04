@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
 from . import chave_cte, config, relatorios_bipagem, tipos_cte
 from . import bloqueio_login, escopo, gdc, historico, planilha_marca
@@ -37,7 +37,15 @@ from .security import (
     conferir_senha,
     create_share_token,
     eh_supervisor,
+    TELAS,
+    TELAS_CHAVES,
     escopo_empresas,
+    exigir_tela_api,
+    exigir_tela_page,
+    pode_ver_tela,
+    telas_do_usuario,
+    telas_salvas,
+    url_inicial,
     hash_senha,
     is_authenticated,
     precisa_trocar_senha,
@@ -98,6 +106,7 @@ templates.env.globals["eh_supervisor"] = eh_supervisor
 templates.env.globals["usuario_logado"] = usuario_logado
 templates.env.globals["pode_ver_sac"] = pode_ver_sac
 templates.env.globals["pode_emitir_cte"] = pode_emitir_cte
+templates.env.globals["pode_ver_tela"] = pode_ver_tela
 
 
 @app.exception_handler(HTTPException)
@@ -235,23 +244,32 @@ def api_link_acesso(request: Request):
 
 # ------------------------------------------------------------- painel -----
 
-@app.get("/painel", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+@app.get("/sem-acesso", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+def sem_acesso_page(request: Request):
+    """Analista sem nenhuma tela liberada -- o supervisor marca as telas na tela Usuários."""
+    destino = url_inicial(request)
+    if destino != "/sem-acesso":
+        return RedirectResponse(url=destino)
+    return templates.TemplateResponse("sem_acesso.html", {"request": request, "active": ""})
+
+
+@app.get("/painel", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("painel"))])
 def painel_page(request: Request):
     return templates.TemplateResponse("painel.html", {"request": request, "active": "painel"})
 
 
-@app.get("/historico", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+@app.get("/historico", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("historico"))])
 def historico_page(request: Request):
     """Tendência dos números dia a dia (foto gravada a cada sincronização)."""
     return templates.TemplateResponse("historico.html", {"request": request, "active": "historico"})
 
 
-@app.get("/gdc", response_class=HTMLResponse, dependencies=[Depends(require_acesso_completo_page)])
+@app.get("/gdc", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("gdc"))])
 def gdc_page(request: Request):
     return templates.TemplateResponse("gdc.html", {"request": request, "active": "gdc", "banco_proprio": gdc.BANCO_PROPRIO})
 
 
-@app.get("/comprovantes", response_class=HTMLResponse, dependencies=[Depends(require_acesso_completo_page)])
+@app.get("/comprovantes", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("comprovantes"))])
 def comprovantes_page(request: Request):
     """Quantos CT-e têm comprovante de entrega no GW (coluna "Data
     Comprovante" do relatório) e quantos ainda faltam -- usa os mesmos dados
@@ -324,7 +342,7 @@ def _cargas_cacheadas(chave, validade: str, gerar) -> bytes:
     return corpo
 
 
-@app.get("/api/cargas", dependencies=[Depends(require_auth_api)])
+@app.get("/api/cargas", dependencies=[Depends(exigir_tela_api("painel", "comprovantes"))])
 def api_cargas(
     request: Request,
     data_inicial: str | None = None,
@@ -412,7 +430,7 @@ def _tratativas_do_analista(db: Session, empresas: set[str], tratativas: list[Tr
     return [t for t in tratativas if t.id_cte in visiveis or (t.cliente or "").strip().upper() in empresas]
 
 
-@app.get("/api/tratativas", dependencies=[Depends(require_acesso_completo_api)])
+@app.get("/api/tratativas", dependencies=[Depends(exigir_tela_api("comprovantes"))])
 def api_tratativas(request: Request, db: Session = Depends(get_db)):
     """As tratativas lançadas (são poucas, digitadas à mão) -- a tela agrupa
     por CT-e e busca por CT-e/NF no navegador."""
@@ -423,7 +441,7 @@ def api_tratativas(request: Request, db: Session = Depends(get_db)):
     return {"tratativas": [_tratativa_to_dict(t) for t in rows]}
 
 
-@app.post("/api/tratativas", dependencies=[Depends(require_acesso_completo_api)])
+@app.post("/api/tratativas", dependencies=[Depends(exigir_tela_api("comprovantes"))])
 def api_tratativas_registrar(request: Request, payload: dict, db: Session = Depends(get_db)):
     id_cte = str(payload.get("id_cte") or "").strip()
     texto = str(payload.get("texto") or "").strip()
@@ -454,7 +472,7 @@ def api_tratativas_registrar(request: Request, payload: dict, db: Session = Depe
     return _tratativa_to_dict(t)
 
 
-@app.delete("/api/tratativas/{tratativa_id}", dependencies=[Depends(require_acesso_completo_api)])
+@app.delete("/api/tratativas/{tratativa_id}", dependencies=[Depends(exigir_tela_api("comprovantes"))])
 def api_tratativas_remover(request: Request, tratativa_id: int, db: Session = Depends(get_db)):
     """Apaga um lançamento feito por engano."""
     t = db.get(TratativaComprovante, tratativa_id)
@@ -487,6 +505,8 @@ def _usuario_to_dict(u: Usuario, bloqueado_ate: datetime.datetime | None = None)
         "email": u.email or "",
         "acesso_sac": bool(u.acesso_sac),
         "emite_cte": bool(u.emite_cte),
+        "telas": [c for c in TELAS_CHAVES if c in telas_do_usuario(
+            {"telas": telas_salvas(u.telas), "emite_cte": u.emite_cte, "acesso_sac": u.acesso_sac})],
         "trocar_senha": bool(u.trocar_senha),
         "empresas": json.loads(u.empresas or "[]"),
         "criado_em": u.criado_em.isoformat() + "Z" if u.criado_em else None,
@@ -496,9 +516,10 @@ def _usuario_to_dict(u: Usuario, bloqueado_ate: datetime.datetime | None = None)
 
 @app.get("/api/usuarios", dependencies=[Depends(require_supervisor_api)])
 def api_usuarios(db: Session = Depends(get_db)):
-    rows = db.query(Usuario).order_by(func.lower(Usuario.nome)).all()
+    rows = db.query(Usuario).options(undefer(Usuario.telas)).order_by(func.lower(Usuario.nome)).all()
     bloqueios = bloqueio_login.bloqueios_de_usuarios(db)
-    return {"usuarios": [_usuario_to_dict(u, bloqueios.get(u.login)) for u in rows]}
+    return {"usuarios": [_usuario_to_dict(u, bloqueios.get(u.login)) for u in rows],
+            "telas": [{"chave": c, "nome": n, "padrao": p} for c, n, _, p in TELAS]}
 
 
 @app.post("/api/usuarios/{usuario_id}/desbloquear", dependencies=[Depends(require_supervisor_api)])
@@ -545,8 +566,14 @@ def _validar_usuario(db: Session, payload: dict, usuario_id: int | None) -> tupl
     existente = db.query(Usuario).filter(Usuario.login == login).first()
     if existente and existente.id != usuario_id:
         return None, "Já existe um analista com esse login."
+    telas = None  # None = o formulário não mexeu nas telas
+    acesso_sac, emite_cte = bool(payload.get("acesso_sac")), bool(payload.get("emite_cte"))
+    if "telas" in payload:
+        pedidas = payload.get("telas")
+        telas = [c for c in TELAS_CHAVES if isinstance(pedidas, list) and c in pedidas]
+        acesso_sac, emite_cte = "sac" in telas, "emissao" in telas  # os dois avisos antigos acompanham
     return {"nome": nome, "login": login, "senha": senha, "empresas": empresas, "email": email or None,
-            "acesso_sac": bool(payload.get("acesso_sac")), "emite_cte": bool(payload.get("emite_cte"))}, None
+            "acesso_sac": acesso_sac, "emite_cte": emite_cte, "telas": telas}, None
 
 
 @app.post("/api/usuarios", dependencies=[Depends(require_supervisor_api)])
@@ -558,6 +585,7 @@ def api_usuarios_criar(payload: dict, db: Session = Depends(get_db)):
         nome=dados["nome"], login=dados["login"], senha_hash=hash_senha(dados["senha"]),
         empresas=json.dumps(dados["empresas"], ensure_ascii=False), ativo=True, trocar_senha=True,
         email=dados["email"], acesso_sac=dados["acesso_sac"], emite_cte=dados["emite_cte"],
+        telas=json.dumps(dados["telas"]) if dados["telas"] is not None else None,
     )
     db.add(u)
     db.commit()
@@ -578,10 +606,14 @@ def api_usuarios_editar(usuario_id: int, payload: dict, db: Session = Depends(ge
     u.empresas = json.dumps(dados["empresas"], ensure_ascii=False)
     if "email" in payload:  # quem não manda o campo (ex.: Desativar) não apaga o e-mail
         u.email = dados["email"]
-    if "acesso_sac" in payload:
-        u.acesso_sac = dados["acesso_sac"]
-    if "emite_cte" in payload:
-        u.emite_cte = dados["emite_cte"]
+    if "telas" in payload:
+        u.telas = json.dumps(dados["telas"])
+        u.acesso_sac, u.emite_cte = dados["acesso_sac"], dados["emite_cte"]
+    else:
+        if "acesso_sac" in payload:
+            u.acesso_sac = dados["acesso_sac"]
+        if "emite_cte" in payload:
+            u.emite_cte = dados["emite_cte"]
     if dados["senha"]:
         # Senha nova definida pelo supervisor é provisória: o analista troca
         # no próximo acesso.
@@ -952,7 +984,7 @@ def api_emissoes_cancelar(emissao_id: int, db: Session = Depends(get_db)):
 
 # ------------------------------------------------------------ bipagem -----
 
-@app.get("/bipagem", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+@app.get("/bipagem", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("bipagem"))])
 def bipagem_page(request: Request):
     return templates.TemplateResponse("bipagem.html", {"request": request, "active": "bipagem"})
 
@@ -1026,7 +1058,7 @@ def _bip_do_mesmo_documento(db: Session, resultado: dict) -> Bipagem | None:
     return None
 
 
-@app.post("/api/bipagem", dependencies=[Depends(require_auth_api)])
+@app.post("/api/bipagem", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_bipagem_registrar(request: Request, payload: dict, db: Session = Depends(get_db)):
     """Registra um bip -- o mesmo bip vale pro controle de comprovantes e
     pro protocolo de faturas. Repetir a mesma chave não cria outro registro:
@@ -1061,7 +1093,7 @@ def api_bipagem_registrar(request: Request, payload: dict, db: Session = Depends
     return resultado
 
 
-@app.delete("/api/bipagem", dependencies=[Depends(require_auth_api)])
+@app.delete("/api/bipagem", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_bipagem_remover(request: Request, chave: str, db: Session = Depends(get_db)):
     """Desfaz um bip (ex: bipado por engano) -- no controle de comprovantes
     o CT-e volta a ficar sem data de envio. Não desfaz bip que já entrou num
@@ -1095,12 +1127,12 @@ def _xlsx_response(conteudo: bytes, nome: str) -> StreamingResponse:
     )
 
 
-@app.get("/api/bipagem/tomadores", dependencies=[Depends(require_auth_api)])
+@app.get("/api/bipagem/tomadores", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_bipagem_tomadores(request: Request, db: Session = Depends(get_db)):
     return {"tomadores": relatorios_bipagem.tomadores_disponiveis(db, escopo_empresas(request))}
 
 
-@app.get("/api/bipagem/controle", dependencies=[Depends(require_auth_api)])
+@app.get("/api/bipagem/controle", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_bipagem_controle(request: Request, tomador: str, mes: str, responsavel: str = "", db: Session = Depends(get_db)):
     """Controle mensal de comprovantes (modelo "SETEMBRO - GUANABARA") --
     `tomador` é a raiz (8 dígitos) do CNPJ ou "nome:<nome>" (ver
@@ -1134,13 +1166,13 @@ def _protocolo_to_dict(p: ProtocoloFatura) -> dict:
     }
 
 
-@app.get("/api/bipagem/faturas/pendentes", dependencies=[Depends(require_auth_api)])
+@app.get("/api/bipagem/faturas/pendentes", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_faturas_pendentes(request: Request, db: Session = Depends(get_db)):
     """CT-e bipados que ainda não entraram em nenhum protocolo de faturas."""
     return {"pendentes": relatorios_bipagem.faturas_pendentes(db, escopo_empresas(request))}
 
 
-@app.post("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_auth_api)])
+@app.post("/api/bipagem/faturas/protocolos", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_faturas_gerar_protocolo(request: Request, payload: dict, db: Session = Depends(get_db)):
     """Gera o protocolo de envio de faturas (modelo "ENVIO DE COMPROVANTE -
     PETROCARGAS") com os CT-e pendentes do tomador e dá baixa neles -- o
@@ -1166,7 +1198,7 @@ def _protocolo_permitido(request: Request, db: Session, protocolo_id: int) -> bo
     return empresas is None or protocolo_id in _protocolos_visiveis(db, empresas)
 
 
-@app.get("/api/bipagem/faturas/protocolos", dependencies=[Depends(require_auth_api)])
+@app.get("/api/bipagem/faturas/protocolos", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_faturas_protocolos(request: Request, db: Session = Depends(get_db)):
     q = db.query(ProtocoloFatura)
     empresas = escopo_empresas(request)
@@ -1176,7 +1208,7 @@ def api_faturas_protocolos(request: Request, db: Session = Depends(get_db)):
     return {"protocolos": [_protocolo_to_dict(p) for p in protocolos]}
 
 
-@app.get("/api/bipagem/faturas/protocolos/{protocolo_id}/arquivo", dependencies=[Depends(require_auth_api)])
+@app.get("/api/bipagem/faturas/protocolos/{protocolo_id}/arquivo", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_faturas_protocolo_arquivo(request: Request, protocolo_id: int, db: Session = Depends(get_db)):
     p = db.query(ProtocoloFatura).filter(ProtocoloFatura.id == protocolo_id).first()
     if not p or not p.arquivo or not _protocolo_permitido(request, db, protocolo_id):
@@ -1189,7 +1221,7 @@ def api_faturas_protocolo_arquivo(request: Request, protocolo_id: int, db: Sessi
     return _xlsx_response(arquivo, f"protocolo_faturas_{p.id}_{nome}_{data}.xlsx")
 
 
-@app.delete("/api/bipagem/faturas/protocolos/{protocolo_id}", dependencies=[Depends(require_auth_api)])
+@app.delete("/api/bipagem/faturas/protocolos/{protocolo_id}", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_faturas_desfazer_protocolo(request: Request, protocolo_id: int, db: Session = Depends(get_db)):
     """Desfaz um protocolo gerado por engano -- os CT-e dele voltam a ficar
     pendentes de protocolo."""
@@ -1216,7 +1248,7 @@ _COLUNAS_BIPAGEM = [
 ]
 
 
-@app.post("/api/bipagem/exportar", dependencies=[Depends(require_auth_api)])
+@app.post("/api/bipagem/exportar", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_bipagem_exportar(request: Request, payload: dict, db: Session = Depends(get_db)):
     leituras = [str(x) for x in (payload.get("leituras") or [])][:2000]
     empresas = escopo_empresas(request)
@@ -1247,7 +1279,7 @@ def api_bipagem_exportar(request: Request, payload: dict, db: Session = Depends(
 
 # --------------------------------------------------- consulta de notas ----
 
-@app.get("/consultas", response_class=HTMLResponse, dependencies=[Depends(require_auth_page)])
+@app.get("/consultas", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("consultas"))])
 def consultas_page(request: Request):
     return templates.TemplateResponse("consultas.html", {"request": request, "active": "consultas"})
 
@@ -1307,14 +1339,14 @@ def _job_to_dict(job: ConsultaJob) -> dict:
     }
 
 
-@app.get("/api/consultas", dependencies=[Depends(require_auth_api)])
+@app.get("/api/consultas", dependencies=[Depends(exigir_tela_api("consultas"))])
 def api_consultas_list(db: Session = Depends(get_db)):
     _expirar_jobs_sem_iniciar(db)
     jobs = db.query(ConsultaJob).order_by(ConsultaJob.criado_em.desc()).limit(30).all()
     return {"jobs": [_job_to_dict(j) for j in jobs]}
 
 
-@app.get("/api/consultas/{job_id}", dependencies=[Depends(require_auth_api)])
+@app.get("/api/consultas/{job_id}", dependencies=[Depends(exigir_tela_api("consultas"))])
 def api_consultas_status(job_id: int, db: Session = Depends(get_db)):
     _expirar_jobs_sem_iniciar(db)
     job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
@@ -1323,7 +1355,7 @@ def api_consultas_status(job_id: int, db: Session = Depends(get_db)):
     return _job_to_dict(job)
 
 
-@app.delete("/api/consultas/{job_id}", dependencies=[Depends(require_auth_api)])
+@app.delete("/api/consultas/{job_id}", dependencies=[Depends(exigir_tela_api("consultas"))])
 def api_consultas_delete(job_id: int, db: Session = Depends(get_db)):
     job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
     if not job:
@@ -1394,7 +1426,7 @@ def _detectar_coluna_cliente(cabecalho: list[str]) -> str | None:
     return _detectar_coluna(cabecalho, lambda n: re.search(r"\bcliente\b", n) is not None)
 
 
-@app.post("/api/consultas", dependencies=[Depends(require_auth_api)])
+@app.post("/api/consultas", dependencies=[Depends(exigir_tela_api("consultas"))])
 async def api_consultas_create(
     arquivo: UploadFile,
     db: Session = Depends(get_db),
@@ -1523,7 +1555,7 @@ def _content_disposition(nome: str) -> str:
     return f"attachment; filename=\"{ascii_nome}\"; filename*=UTF-8''{quote(nome)}"
 
 
-@app.get("/api/consultas/{job_id}/arquivo", dependencies=[Depends(require_auth_api)])
+@app.get("/api/consultas/{job_id}/arquivo", dependencies=[Depends(exigir_tela_api("consultas"))])
 def api_consultas_arquivo(job_id: int, db: Session = Depends(get_db)):
     job = db.query(ConsultaJob).filter(ConsultaJob.id == job_id).first()
     if not job:

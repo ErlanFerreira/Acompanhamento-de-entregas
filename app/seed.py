@@ -43,6 +43,7 @@ _COLUNAS_ADICIONADAS = {
         "email": "VARCHAR(255)",
         "acesso_sac": "BOOLEAN DEFAULT FALSE",
         "emite_cte": "BOOLEAN DEFAULT FALSE",
+        "telas": "TEXT",
     },
 }
 

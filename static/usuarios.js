@@ -12,6 +12,8 @@
   let empresas = null;  // carregadas na primeira abertura do formulário
   let editando = null;  // analista em edição (null = novo)
   let marcadas = new Set();
+  let telasInfo = [];  // [{chave, nome, padrao}] -- vem de /api/usuarios
+  let telasMarcadas = new Set();
 
   const modal = document.getElementById("usr-modal");
   const $ = id => document.getElementById(id);
@@ -25,7 +27,9 @@
   }
 
   async function carregarUsuarios() {
-    usuarios = (await api("/api/usuarios")).usuarios;
+    const r = await api("/api/usuarios");
+    usuarios = r.usuarios;
+    telasInfo = r.telas || [];
     renderUsuarios();
   }
 
@@ -34,7 +38,7 @@
     $("usuarios-count").textContent = fmtN(usuarios.length) + " cadastrado(s) · " + fmtN(ativos) + " ativo(s)";
     const tbody = $("usuarios-body");
     if (!usuarios.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">Nenhum analista cadastrado ainda. Clique em "+ Novo analista".</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state">Nenhum analista cadastrado ainda. Clique em "+ Novo analista".</div></td></tr>';
       return;
     }
     tbody.innerHTML = usuarios.map((u, i) => {
@@ -46,9 +50,8 @@
         '<td>' + esc(u.login) + '</td>' +
         '<td>' + (u.email ? esc(u.email) : '<span class="bip-muted" title="Sem e-mail, não recebe o resumo diário">—</span>') + '</td>' +
         '<td title="' + esc(u.empresas.join("\n")) + '">' + emp + '</td>' +
+        '<td>' + resumoTelas(u) + '</td>' +
         '<td>' + (u.ativo ? '<span class="bip-tag faturado">Ativo</span>' : '<span class="bip-tag">Desativado</span>') +
-          (u.acesso_sac ? ' <span class="bip-tag" title="Vê o atalho do Portal SAC no menu">Portal SAC</span>' : "") +
-          (u.emite_cte ? ' <span class="bip-tag" title="Pode usar a tela Emissão de CT-e">Emite CT-e</span>' : "") +
           (u.ativo && u.trocar_senha ? ' <span class="bip-tag" title="Ainda não trocou a senha definida por você">senha provisória</span>' : "") +
           (u.bloqueado_ate ? ' <span class="bip-tag usr-bloqueado" title="Errou a senha várias vezes">bloqueado até ' +
             new Date(u.bloqueado_ate).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + '</span>' : "") + '</td>' +
@@ -61,6 +64,31 @@
     tbody.querySelectorAll("[data-ativar]").forEach(b => b.addEventListener("click", () => alternarAtivo(usuarios[+b.dataset.ativar])));
     tbody.querySelectorAll("[data-desbloquear]").forEach(b => b.addEventListener("click", () => desbloquear(usuarios[+b.dataset.desbloquear])));
   }
+
+  // "6 de 8 telas", com os nomes no balão.
+  function resumoTelas(u) {
+    if (!telasInfo.length) return "";
+    const nomes = telasInfo.filter(t => u.telas.includes(t.chave)).map(t => t.nome);
+    if (!nomes.length) return '<span class="flag-no" title="Nenhuma tela liberada: o analista só vê a mensagem de acesso">nenhuma</span>';
+    return '<span title="' + esc(nomes.join("\n")) + '">' + nomes.length + " de " + telasInfo.length + " telas</span>";
+  }
+
+  function renderTelas() {
+    $("usr-telas").innerHTML = telasInfo.map(t =>
+      '<label class="usr-tela"><input type="checkbox" value="' + esc(t.chave) + '"' + (telasMarcadas.has(t.chave) ? " checked" : "") + '> ' + esc(t.nome) + '</label>'
+    ).join("");
+    $("usr-telas").querySelectorAll("input[type=checkbox]").forEach(cb => cb.addEventListener("change", () => {
+      if (cb.checked) telasMarcadas.add(cb.value); else telasMarcadas.delete(cb.value);
+      $("usr-telas-count").textContent = "· " + telasMarcadas.size + " de " + telasInfo.length;
+    }));
+    $("usr-telas-count").textContent = "· " + telasMarcadas.size + " de " + telasInfo.length;
+  }
+
+  document.querySelectorAll("[data-telas]").forEach(b => b.addEventListener("click", () => {
+    const modo = b.dataset.telas;
+    telasMarcadas = new Set(telasInfo.filter(t => modo === "todas" || (modo === "padrao" && t.padrao)).map(t => t.chave));
+    renderTelas();
+  }));
 
   async function desbloquear(u) {
     try {
@@ -86,8 +114,8 @@
     $("usr-nome").value = u ? u.nome : "";
     $("usr-login").value = u ? u.login : "";
     $("usr-email").value = u ? u.email || "" : "";
-    $("usr-sac").checked = !!(u && u.acesso_sac);
-    $("usr-cte").checked = !!(u && u.emite_cte);
+    telasMarcadas = new Set(u ? u.telas : telasInfo.filter(t => t.padrao).map(t => t.chave));
+    renderTelas();
     $("usr-senha").value = "";
     $("usr-senha").required = !u;
     $("usr-senha-hint").textContent = u
@@ -143,10 +171,11 @@
   async function salvar(e) {
     e.preventDefault();
     const dados = {
-      nome: $("usr-nome").value, login: $("usr-login").value, email: $("usr-email").value, acesso_sac: $("usr-sac").checked, emite_cte: $("usr-cte").checked, senha: $("usr-senha").value,
+      nome: $("usr-nome").value, login: $("usr-login").value, email: $("usr-email").value, telas: Array.from(telasMarcadas), senha: $("usr-senha").value,
       empresas: Array.from(marcadas)
     };
     if (editando) dados.ativo = $("usr-ativo").checked;
+    if (!dados.telas.length && !confirm("Nenhuma tela marcada: esse analista não vai conseguir abrir nada. Salvar mesmo assim?")) return;
     if (!dados.empresas.length && !confirm("Nenhuma empresa marcada: esse analista não vai ver nenhum CT-e. Salvar mesmo assim?")) return;
     $("usr-salvar").disabled = true;
     $("usr-erro").textContent = "";
@@ -172,6 +201,6 @@
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !modal.hidden) fechar(); });
 
   carregarUsuarios().catch(e => {
-    $("usuarios-body").innerHTML = '<tr><td colspan="6"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
+    $("usuarios-body").innerHTML = '<tr><td colspan="7"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
   });
 })();

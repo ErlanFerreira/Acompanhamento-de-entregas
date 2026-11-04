@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from .db import get_db
 from .logistica import cond_em_deposito, cond_em_rota  # noqa: F401 (resumo_diario usa daqui)
 from .models import Carga, HistoricoDia, HistoricoTomador
-from .security import escopo_empresas, require_auth_api
+from .security import escopo_empresas, exigir_tela_api
 
 logger = logging.getLogger("historico")
 
@@ -169,7 +169,7 @@ def ranking(db: Session, comparar_dias: int, empresas: set[str] | None, limite: 
     return {"data_atual": atual, "data_comparacao": comparacao, "itens": itens[:limite]}
 
 
-@router.get("/api/historico", dependencies=[Depends(require_auth_api)])
+@router.get("/api/historico", dependencies=[Depends(exigir_tela_api("historico"))])
 def api_historico(request: Request, dias: int = 30, comparar: int = 7, db: Session = Depends(get_db)):
     dias = max(7, min(dias, GUARDAR_DIAS))
     comparar = max(1, min(comparar, 60))

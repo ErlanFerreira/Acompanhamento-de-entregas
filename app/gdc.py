@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, declarative_base, relationship, selectinload
 
 from . import db as banco
 from .planilha_marca import Coluna, criar_planilha, resposta_xlsx
-from .security import require_acesso_completo_api, usuario_logado
+from .security import exigir_tela_api, usuario_logado
 
 _url_gdc = banco._url(os.environ.get("GDC_DATABASE_URL", "").strip())
 BANCO_PROPRIO = bool(_url_gdc)
@@ -223,7 +223,7 @@ def _conta(condicao):
     return func.coalesce(func.sum(case((condicao, 1), else_=0)), 0)
 
 
-@router.get("/api/gdc", dependencies=[Depends(require_acesso_completo_api)])
+@router.get("/api/gdc", dependencies=[Depends(exigir_tela_api("gdc"))])
 def api_gdc_lista(busca: str = "", de: str = "", ate: str = "", baixado: str = "", devolucao: str = "",
                   retencao: str = "", gw: str = "", portal: str = "", pagina: int = 1, db: Session = Depends(get_gdc_db)):
     q = _filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao, gw, portal)
@@ -245,7 +245,7 @@ def api_gdc_lista(busca: str = "", de: str = "", ate: str = "", baixado: str = "
     }
 
 
-@router.post("/api/gdc", dependencies=[Depends(require_acesso_completo_api)])
+@router.post("/api/gdc", dependencies=[Depends(exigir_tela_api("gdc"))])
 def api_gdc_criar(request: Request, payload: dict, db: Session = Depends(get_gdc_db)):
     dados, erro = _validar(payload)
     if erro:
@@ -261,7 +261,7 @@ def api_gdc_criar(request: Request, payload: dict, db: Session = Depends(get_gdc
     return _to_dict(e)
 
 
-@router.put("/api/gdc/{entrega_id}", dependencies=[Depends(require_acesso_completo_api)])
+@router.put("/api/gdc/{entrega_id}", dependencies=[Depends(exigir_tela_api("gdc"))])
 def api_gdc_editar(request: Request, entrega_id: int, payload: dict, db: Session = Depends(get_gdc_db)):
     e = db.get(GdcEntrega, entrega_id)
     if not e:
@@ -281,7 +281,7 @@ def api_gdc_editar(request: Request, entrega_id: int, payload: dict, db: Session
     return _to_dict(e)
 
 
-@router.delete("/api/gdc/{entrega_id}", dependencies=[Depends(require_acesso_completo_api)])
+@router.delete("/api/gdc/{entrega_id}", dependencies=[Depends(exigir_tela_api("gdc"))])
 def api_gdc_excluir(entrega_id: int, db: Session = Depends(get_gdc_db)):
     e = db.get(GdcEntrega, entrega_id)
     if e:
@@ -290,7 +290,7 @@ def api_gdc_excluir(entrega_id: int, db: Session = Depends(get_gdc_db)):
     return {"ok": True}
 
 
-@router.get("/api/gdc/exportar", dependencies=[Depends(require_acesso_completo_api)])
+@router.get("/api/gdc/exportar", dependencies=[Depends(exigir_tela_api("gdc"))])
 def api_gdc_exportar(busca: str = "", de: str = "", ate: str = "", baixado: str = "", devolucao: str = "",
                      retencao: str = "", gw: str = "", portal: str = "", db: Session = Depends(get_gdc_db)):
     itens = (_filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao, gw, portal)

@@ -1,6 +1,7 @@
 import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy.orm import deferred
 
 from .db import Base
 
@@ -140,6 +141,10 @@ class Usuario(Base):
     acesso_sac = Column(Boolean, default=False, nullable=False)
     # Pode usar a tela "Emissão de CT-e" (o supervisor sempre pode).
     emite_cte = Column(Boolean, default=False, nullable=False)
+    # Telas liberadas ao analista: JSON com as chaves de security.TELAS. Vazio
+    # (nunca configurado) = o que ele já tinha: telas padrão + os avisos acima.
+    # deferred: se a coluna ainda não existe no banco (migração pendente), o login não quebra
+    telas = deferred(Column(Text, nullable=True))
     # Senha definida pelo supervisor (cadastro ou redefinição) -- no próximo
     # login o analista tem de trocar antes de usar o sistema.
     trocar_senha = Column(Boolean, default=True, nullable=False)
