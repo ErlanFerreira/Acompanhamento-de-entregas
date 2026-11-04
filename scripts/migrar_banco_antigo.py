@@ -62,10 +62,15 @@ def _acertar_sequencia(destino, tabela) -> None:
     if destino.dialect.name != "postgresql" or "id" not in tabela.c:
         return
     with destino.begin() as conn:
+        # o nome da sequência nem sempre é <tabela>_id_seq: pergunta ao Postgres
+        # (NULL = o id não é gerado por sequência, nada a acertar)
+        seq = conn.execute(text("SELECT pg_get_serial_sequence(:t, 'id')"), {"t": tabela.name}).scalar()
+        if not seq:
+            return
         maior = conn.execute(select(func.max(tabela.c.id))).scalar() or 0
-        atual = conn.execute(text(f"SELECT last_value FROM {tabela.name}_id_seq")).scalar() or 0
-        if maior >= atual:
-            conn.execute(text(f"SELECT setval('{tabela.name}_id_seq', :v)"), {"v": maior})
+        atual = conn.execute(text(f"SELECT last_value FROM {seq}")).scalar() or 0
+        if maior >= atual and maior > 0:
+            conn.execute(text("SELECT setval(CAST(:s AS regclass), :v)"), {"s": seq, "v": maior})
 
 
 def copiar(origem, tabela, simular: bool) -> None:
