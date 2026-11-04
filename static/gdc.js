@@ -1,9 +1,10 @@
 (function () {
   "use strict";
 
-  // Controle de entregas da operação GDC: lista com filtros (o servidor filtra
-  // e pagina -- /api/gdc) e o formulário de lançamento/edição, com quantas
-  // notas fiscais a guia tiver (e NFD + observações quando houve devolução).
+  // Controle de entregas da operação GDC: as guias em cards, com filtros (o
+  // servidor filtra e pagina -- /api/gdc), em duas abas -- Em aberto e Arquivo
+  // (as concluídas) -- e o formulário de lançamento/edição, com quantas notas
+  // fiscais a guia tiver (e NFD + observações quando houve devolução).
 
   function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
   function fmtN(n) { return Number(n || 0).toLocaleString("pt-BR"); }
@@ -19,9 +20,9 @@
   const FILTROS = ["busca", "de", "ate", "baixado", "gw", "portal", "devolucao", "retencao"];
   // As baixas (sim/não + data quando sim): id no formulário, campo e campo da data na API.
   const BAIXAS = [
-    { id: "baixado", campo: "manifesto_baixado", data: "data_baixa" },
-    { id: "gw", campo: "baixa_gw", data: "data_baixa_gw" },
-    { id: "portal", campo: "baixa_portal", data: "data_baixa_portal" },
+    { id: "baixado", campo: "manifesto_baixado", data: "data_baixa", nome: "Baixa do manifesto" },
+    { id: "gw", campo: "baixa_gw", data: "data_baixa_gw", nome: "Baixa no GW" },
+    { id: "portal", campo: "baixa_portal", data: "data_baixa_portal", nome: "Baixa no portal GDC" },
   ];
 
   let itens = [];
@@ -38,6 +39,8 @@
 
   // ------------------------------------------------------------ lista ----
 
+  let aba = "abertos";  // "abertos" (lista de trabalho) ou "arquivo" (concluídas)
+
   function parametros() {
     const p = new URLSearchParams();
     FILTROS.forEach(f => { const v = $("f-" + f).value.trim(); if (v) p.set(f, v); });
@@ -48,6 +51,7 @@
   async function carregar() {
     const meu = ++seq;
     const p = parametros();
+    p.set("situacao", aba);
     p.set("pagina", pagina);
     try {
       const r = await api("/api/gdc?" + p.toString());
@@ -55,7 +59,7 @@
       itens = r.itens;
       render(r);
     } catch (e) {
-      $("gdc-body").innerHTML = '<tr><td colspan="11"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
+      $("gdc-cards").innerHTML = '<div class="empty-state">' + esc(e.message) + '</div>';
     }
   }
 
@@ -64,27 +68,64 @@
              : '<span class="bip-tag ' + (ruim ? "gdc-neutro" : "gdc-pendente") + '">Não</span>';
   }
 
-  // Texto longo é cortado com "…" (o completo aparece ao passar o mouse) --
-  // a tabela tem largura fixa (static/app.css, .gdc-tabela), sem rolagem lateral.
-  function corta(texto, classe) {
-    return '<div class="gdc-corta ' + classe + '" title="' + esc(texto) + '">' + esc(texto) + '</div>';
-  }
+  function selo(texto, tipo) { return '<span class="gdc-selo ' + tipo + '">' + texto + '</span>'; }
 
-  function devolucao(e) {
-    if (!e.devolucao) return simNao(false, true);
-    const nfd = e.nfd ? '<span class="gdc-nfd">NFD ' + esc(e.nfd) + '</span>' : '<span class="bip-tag gdc-pendente">sem NFD</span>';
-    return '<span class="gdc-dev"' + (e.obs_devolucao ? ' title="' + esc(e.obs_devolucao) + '"' : "") + '>' +
-      simNao(true, true) + " " + nfd + (e.obs_devolucao ? ' <span class="bip-muted">💬</span>' : "") + "</span>";
+  function pendentes(e) { return BAIXAS.filter(b => !e[b.campo]).map(b => b.nome); }
+
+  // Um card por guia: selos da situação no topo, destinatário, dados da
+  // entrega e, embaixo, as baixas/ocorrências com os botões.
+  function card(e, i) {
+    const falta = pendentes(e);
+    const selos =
+      (e.concluido ? selo("✓ Concluída", "ok") : falta.length ? selo("Baixa pendente", "aviso") : selo("Tudo baixado", "ok")) +
+      (e.devolucao ? selo("Devolução", "critico") : "") +
+      (e.retencao_palets ? selo(fmtN(e.qtd_palets) + " palete(s) retido(s)", "critico") : "");
+    const meta = [
+      e.cidade ? '<span title="Cidade">📍 ' + esc(e.cidade) + '</span>' : "",
+      '<span title="Notas fiscais">🧾 NF ' + (e.notas.length ? esc(e.notas.join(", ")) : "—") + '</span>',
+      '<span title="Manifesto">📄 Manifesto ' + (e.manifesto ? esc(e.manifesto) : "—") + '</span>',
+      '<span title="Lançado por">👤 ' + esc(e.criado_por) + '</span>',
+      '<span title="Lançado em">🕓 ' + fmtDataHora(e.criado_em) + '</span>',
+    ].join("");
+    const baixas = BAIXAS.map(b => '<span class="gdc-item"><span class="gdc-item-k">' + b.nome + '</span> ' +
+      simNao(e[b.campo], false) + (e[b.data] ? ' <span class="gdc-nfd">' + fmtData(e[b.data]) + '</span>' : "") + '</span>').join("");
+    const dev = '<span class="gdc-item"><span class="gdc-item-k">Devolução</span> ' + simNao(e.devolucao, true) +
+      (e.devolucao ? (e.nfd ? ' <span class="gdc-nfd">NFD ' + esc(e.nfd) + '</span>' : ' <span class="bip-tag gdc-pendente">sem NFD</span>') : "") + '</span>';
+    const palets = '<span class="gdc-item"><span class="gdc-item-k">Paletes retidos</span> ' +
+      (e.retencao_palets ? '<span class="bip-tag gdc-ruim">' + fmtN(e.qtd_palets) + '</span>' : '<span class="bip-tag gdc-neutro">Não</span>') + '</span>';
+    const acoes = e.concluido
+      ? '<button type="button" class="btn" data-reabrir="' + i + '" title="Volta para a lista Em aberto">↺ Reabrir</button>' +
+        '<button type="button" class="btn" data-editar="' + i + '">Editar</button>'
+      : '<button type="button" class="btn gdc-btn-concluir" data-concluir="' + i + '">✓ Concluir</button>' +
+        '<button type="button" class="btn" data-editar="' + i + '">Editar</button>' +
+        '<button type="button" class="btn gdc-btn-excluir" data-excluir="' + i + '">Excluir</button>';
+    const notas = [
+      e.devolucao && e.obs_devolucao ? '<div class="gdc-card-obs"><strong>Devolução:</strong> ' + esc(e.obs_devolucao) + '</div>' : "",
+      e.observacao ? '<div class="gdc-card-obs">💬 ' + esc(e.observacao) + '</div>' : "",
+      e.concluido ? '<div class="gdc-card-obs gdc-concluida">✓ Concluída em ' + fmtDataHora(e.concluido_em) +
+        (e.concluido_por ? " por " + esc(e.concluido_por) : "") + '</div>' : "",
+    ].join("");
+    return '<article class="gdc-card">' +
+      '<div class="gdc-card-topo"><h3>Guia ' + esc(e.guia) + '</h3><span class="gdc-card-data">' + fmtData(e.data) + '</span>' + selos + '</div>' +
+      '<div class="gdc-card-dest" title="' + esc(e.destinatario) + '">' + esc(e.destinatario) + '</div>' +
+      '<div class="gdc-card-meta">' + meta + '</div>' +
+      '<div class="gdc-card-status"><div class="gdc-itens">' + baixas + dev + palets + '</div>' +
+        '<div class="gdc-card-acoes">' + acoes + '</div></div>' +
+      notas +
+      '</article>';
   }
 
   function render(r) {
     const s = r.resumo;
     $("k-total").textContent = fmtN(s.total);
+    $("k-total-sub").textContent = aba === "arquivo" ? "no arquivo" : "em aberto";
     $("k-nao-baixados").textContent = fmtN(s.nao_baixados);
     $("k-devolucoes").textContent = fmtN(s.devolucoes);
     $("k-retencoes").textContent = fmtN(s.retencoes);
     $("k-palets").textContent = s.palets ? fmtN(s.palets) + " palete(s) retido(s)" : "clique para filtrar";
-    $("gdc-count").textContent = fmtN(s.total) + " lançamento(s)";
+    $("aba-abertos").textContent = fmtN(r.abas.abertos);
+    $("aba-arquivo").textContent = fmtN(r.abas.arquivo);
+    $("gdc-count").textContent = fmtN(s.total) + " guia(s)";
 
     const paginas = Math.max(1, Math.ceil(s.total / r.por_pagina));
     $("gdc-paginacao").hidden = paginas <= 1;
@@ -92,32 +133,39 @@
     $("pg-anterior").disabled = r.pagina <= 1;
     $("pg-proxima").disabled = r.pagina >= paginas;
 
-    const tbody = $("gdc-body");
+    const lista = $("gdc-cards");
     if (!itens.length) {
       const filtrado = [...parametros().keys()].length;
-      tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state">' +
-        (filtrado ? "Nenhum lançamento com esses filtros." : 'Nenhuma entrega lançada ainda. Clique em "+ Nova entrega".') + '</div></td></tr>';
+      lista.innerHTML = '<div class="empty-state">' + (filtrado ? "Nenhuma guia com esses filtros nesta aba." :
+        aba === "arquivo" ? "Nenhuma guia concluída ainda." : 'Nenhuma guia em aberto. Clique em "+ Nova entrega".') + '</div>';
       return;
     }
-    tbody.innerHTML = itens.map((e, i) =>
-      '<tr>' +
-      '<td class="num gdc-nowrap">' + fmtData(e.data) + '</td>' +
-      '<td><div class="gdc-guia"><strong class="gdc-corta" title="' + esc(e.guia) + '">' + esc(e.guia) + '</strong>' +
-        (e.observacao ? '<span class="gdc-tem-obs" title="' + esc(e.observacao) + '">💬</span>' : "") + '</div></td>' +
-      '<td class="num gdc-nfs">' + (e.notas.length ? esc(e.notas.join(", ")) : '<span class="bip-muted">—</span>') + '</td>' +
-      '<td>' + corta(e.destinatario, "") + (e.cidade ? corta(e.cidade, "gdc-cidade") : "") + '</td>' +
-      '<td class="num">' + (e.manifesto ? esc(e.manifesto) : '<span class="bip-muted">—</span>') + '</td>' +
-      // Na tabela a data da baixa sai só com dia/mês (a completa fica no "title").
-      BAIXAS.map(b => '<td class="gdc-nowrap"' + (e[b.data] ? ' title="Baixado em ' + fmtData(e[b.data]) + '"' : "") + '>' +
-        simNao(e[b.campo], false) + (e[b.data] ? ' <span class="gdc-nfd">' + fmtData(e[b.data]).slice(0, 5) + '</span>' : "") +
-        '</td>').join("") +
-      '<td>' + devolucao(e) + '</td>' +
-      '<td>' + (e.retencao_palets ? '<span class="bip-tag gdc-ruim">' + fmtN(e.qtd_palets) + '</span>' : '<span class="bip-tag gdc-neutro">Não</span>') + '</td>' +
-      '<td class="bip-acoes"><button type="button" class="btn" data-editar="' + i + '" title="Editar lançamento">✎</button> ' +
-      '<button type="button" class="btn" data-excluir="' + i + '" title="Excluir lançamento">✕</button></td>' +
-      '</tr>').join("");
-    tbody.querySelectorAll("[data-editar]").forEach(b => b.addEventListener("click", () => abrir(itens[+b.dataset.editar])));
-    tbody.querySelectorAll("[data-excluir]").forEach(b => b.addEventListener("click", () => excluir(itens[+b.dataset.excluir])));
+    lista.innerHTML = itens.map(card).join("");
+    lista.querySelectorAll("[data-editar]").forEach(b => b.addEventListener("click", () => abrir(itens[+b.dataset.editar])));
+    lista.querySelectorAll("[data-excluir]").forEach(b => b.addEventListener("click", () => excluir(itens[+b.dataset.excluir])));
+    lista.querySelectorAll("[data-concluir]").forEach(b => b.addEventListener("click", () => concluir(itens[+b.dataset.concluir], true)));
+    lista.querySelectorAll("[data-reabrir]").forEach(b => b.addEventListener("click", () => concluir(itens[+b.dataset.reabrir], false)));
+  }
+
+  function trocarAba(nova) {
+    aba = nova;
+    pagina = 1;
+    document.querySelectorAll(".gdc-aba").forEach(b => b.classList.toggle("ativa", b.dataset.aba === aba));
+    carregar();
+  }
+
+  // Concluir manda a guia pro Arquivo; reabrir traz de volta pra lista.
+  async function concluir(e, sim) {
+    const falta = pendentes(e);
+    const msg = sim
+      ? "Concluir a guia " + e.guia + "? Ela sai da lista e vai para o Arquivo." +
+        (falta.length ? "\n\nAtenção, ainda pendente: " + falta.join(", ") + "." : "")
+      : "Reabrir a guia " + e.guia + "? Ela volta para a lista Em aberto.";
+    if (!confirm(msg)) return;
+    try {
+      await api("/api/gdc/" + e.id + (sim ? "/concluir" : "/reabrir"), { method: "POST" });
+      await carregar();
+    } catch (err) { alert(err.message); }
   }
 
   async function excluir(e) {
@@ -269,7 +317,12 @@
   }));
   $("pg-anterior").addEventListener("click", () => { pagina--; carregar(); });
   $("pg-proxima").addEventListener("click", () => { pagina++; carregar(); });
-  $("btn-exportar").addEventListener("click", () => { window.location.href = "/api/gdc/exportar?" + parametros().toString(); });
+  $("btn-exportar").addEventListener("click", () => {
+    const p = parametros();
+    p.set("situacao", aba);
+    window.location.href = "/api/gdc/exportar?" + p.toString();
+  });
+  document.querySelectorAll(".gdc-aba").forEach(b => b.addEventListener("click", () => trocarAba(b.dataset.aba)));
 
   carregar();
 })();

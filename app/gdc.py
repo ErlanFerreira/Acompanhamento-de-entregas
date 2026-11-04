@@ -57,6 +57,10 @@ class GdcEntrega(GdcBase):
     criado_em = Column(DateTime, nullable=False)
     atualizado_por = Column(String(120))
     atualizado_em = Column(DateTime)
+    # Concluída = sai da lista de trabalho e vai pro Arquivo (só consulta).
+    concluido = Column(Boolean, nullable=False, default=False, index=True)
+    concluido_em = Column(DateTime)
+    concluido_por = Column(String(120))
 
     notas = relationship("GdcNota", cascade="all, delete-orphan", order_by="GdcNota.id", lazy="selectin")
 
@@ -74,7 +78,9 @@ class GdcNota(GdcBase):
 _COLUNAS_ADICIONADAS = {
     "gdc_entregas": {"nfd": "VARCHAR(60) NOT NULL DEFAULT ''", "obs_devolucao": "TEXT NOT NULL DEFAULT ''",
                      "data_baixa": "DATE", "baixa_gw": "BOOLEAN NOT NULL DEFAULT FALSE", "data_baixa_gw": "DATE",
-                     "baixa_portal": "BOOLEAN NOT NULL DEFAULT FALSE", "data_baixa_portal": "DATE"},
+                     "baixa_portal": "BOOLEAN NOT NULL DEFAULT FALSE", "data_baixa_portal": "DATE",
+                     "concluido": "BOOLEAN NOT NULL DEFAULT FALSE", "concluido_em": "TIMESTAMP",
+                     "concluido_por": "VARCHAR(120)"},
 }
 
 # As baixas (sim/não + data quando sim): coluna, coluna da data, nome na tela.
@@ -132,6 +138,8 @@ def _to_dict(e: GdcEntrega) -> dict:
         "retencao_palets": e.retencao_palets, "qtd_palets": e.qtd_palets, "observacao": e.observacao,
         "criado_por": e.criado_por, "criado_em": e.criado_em.isoformat() if e.criado_em else None,
         "atualizado_por": e.atualizado_por, "atualizado_em": e.atualizado_em.isoformat() if e.atualizado_em else None,
+        "concluido": e.concluido, "concluido_por": e.concluido_por,
+        "concluido_em": e.concluido_em.isoformat() if e.concluido_em else None,
     }
 
 
@@ -140,7 +148,10 @@ def _sim_nao(valor) -> bool | None:
 
 
 def _filtrar(q, busca: str, de: str, ate: str, baixado: str, devolucao: str, retencao: str,
-             gw: str = "", portal: str = ""):
+             gw: str = "", portal: str = "", situacao: str = "abertos"):
+    """`situacao`: "abertos" (lista de trabalho), "arquivo" (concluídas) ou "todos"."""
+    if situacao != "todos":
+        q = q.filter(GdcEntrega.concluido.is_(situacao == "arquivo"))
     busca = busca.strip()
     if busca:
         termo = f"%{busca}%"
@@ -225,23 +236,32 @@ def _conta(condicao):
 
 @router.get("/api/gdc", dependencies=[Depends(exigir_tela_api("gdc"))])
 def api_gdc_lista(busca: str = "", de: str = "", ate: str = "", baixado: str = "", devolucao: str = "",
-                  retencao: str = "", gw: str = "", portal: str = "", pagina: int = 1, db: Session = Depends(get_gdc_db)):
-    q = _filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao, gw, portal)
+                  retencao: str = "", gw: str = "", portal: str = "", situacao: str = "abertos", pagina: int = 1,
+                  db: Session = Depends(get_gdc_db)):
+    filtros = (busca, de, ate, baixado, devolucao, retencao, gw, portal)
+    q = _filtrar(db.query(GdcEntrega), *filtros, situacao)
     total, nao_baixados, devolucoes, retencoes, palets = _filtrar(db.query(
         func.count(GdcEntrega.id),
         _conta(GdcEntrega.manifesto_baixado.is_(False)),
         _conta(GdcEntrega.devolucao.is_(True)),
         _conta(GdcEntrega.retencao_palets.is_(True)),
         func.coalesce(func.sum(GdcEntrega.qtd_palets), 0),
-    ), busca, de, ate, baixado, devolucao, retencao, gw, portal).one()
+    ), *filtros, situacao).one()
+    # Quantas há em cada aba com os mesmos filtros (o número ao lado do nome da aba).
+    todas, arquivadas = _filtrar(db.query(func.count(GdcEntrega.id), _conta(GdcEntrega.concluido.is_(True))),
+                                 *filtros, "todos").one()
+    ordem = (GdcEntrega.data.desc(), GdcEntrega.id.desc())
+    if situacao == "arquivo":
+        ordem = (GdcEntrega.concluido_em.desc(),) + ordem  # as concluídas por último primeiro
     pagina = max(1, pagina)
     itens = (q.options(selectinload(GdcEntrega.notas))
-             .order_by(GdcEntrega.data.desc(), GdcEntrega.id.desc())
+             .order_by(*ordem)
              .offset((pagina - 1) * POR_PAGINA).limit(POR_PAGINA).all())
     return {
         "itens": [_to_dict(e) for e in itens], "pagina": pagina, "por_pagina": POR_PAGINA,
         "resumo": {"total": int(total), "nao_baixados": int(nao_baixados), "devolucoes": int(devolucoes),
                    "retencoes": int(retencoes), "palets": int(palets)},
+        "abas": {"abertos": int(todas) - int(arquivadas), "arquivo": int(arquivadas)},
     }
 
 
@@ -281,6 +301,26 @@ def api_gdc_editar(request: Request, entrega_id: int, payload: dict, db: Session
     return _to_dict(e)
 
 
+def _marcar_concluido(request: Request, db: Session, entrega_id: int, concluido: bool):
+    e = db.get(GdcEntrega, entrega_id)
+    if not e:
+        return JSONResponse({"erro": "Lançamento não encontrado (pode ter sido excluído)."}, status_code=404)
+    e.concluido = concluido
+    e.concluido_em, e.concluido_por = (_agora(), _quem(request)) if concluido else (None, None)
+    db.commit()
+    return _to_dict(e)
+
+
+@router.post("/api/gdc/{entrega_id}/concluir", dependencies=[Depends(exigir_tela_api("gdc"))])
+def api_gdc_concluir(request: Request, entrega_id: int, db: Session = Depends(get_gdc_db)):
+    return _marcar_concluido(request, db, entrega_id, True)
+
+
+@router.post("/api/gdc/{entrega_id}/reabrir", dependencies=[Depends(exigir_tela_api("gdc"))])
+def api_gdc_reabrir(request: Request, entrega_id: int, db: Session = Depends(get_gdc_db)):
+    return _marcar_concluido(request, db, entrega_id, False)
+
+
 @router.delete("/api/gdc/{entrega_id}", dependencies=[Depends(exigir_tela_api("gdc"))])
 def api_gdc_excluir(entrega_id: int, db: Session = Depends(get_gdc_db)):
     e = db.get(GdcEntrega, entrega_id)
@@ -292,8 +332,9 @@ def api_gdc_excluir(entrega_id: int, db: Session = Depends(get_gdc_db)):
 
 @router.get("/api/gdc/exportar", dependencies=[Depends(exigir_tela_api("gdc"))])
 def api_gdc_exportar(busca: str = "", de: str = "", ate: str = "", baixado: str = "", devolucao: str = "",
-                     retencao: str = "", gw: str = "", portal: str = "", db: Session = Depends(get_gdc_db)):
-    itens = (_filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao, gw, portal)
+                     retencao: str = "", gw: str = "", portal: str = "", situacao: str = "todos",
+                     db: Session = Depends(get_gdc_db)):
+    itens = (_filtrar(db.query(GdcEntrega), busca, de, ate, baixado, devolucao, retencao, gw, portal, situacao)
              .options(selectinload(GdcEntrega.notas))
              .order_by(GdcEntrega.data.desc(), GdcEntrega.id.desc()).all())
     sn = {True: "Sim", False: "Não"}
@@ -306,14 +347,17 @@ def api_gdc_exportar(busca: str = "", de: str = "", ate: str = "", baixado: str 
         Coluna("Data baixa portal", 12, "data"), Coluna("Devolução", 11, "centro"), Coluna("NFD", 14),
         Coluna("Obs. da devolução", 40), Coluna("Retenção de paletes", 12, "centro"),
         Coluna("Qtd. paletes", 10, "inteiro", total=True), Coluna("Observação", 50), Coluna("Lançado por", 20),
-        Coluna("Lançado em", 17, "datahora"),
+        Coluna("Lançado em", 17, "datahora"), Coluna("Concluído", 11, "centro", cores=cores_sn),
+        Coluna("Concluído em", 17, "datahora"), Coluna("Concluído por", 20),
     ]
     linhas = [[e.data, e.guia, ", ".join(n.numero for n in e.notas), e.destinatario, e.cidade, e.manifesto,
                sn[e.manifesto_baixado], e.data_baixa, sn[e.baixa_gw], e.data_baixa_gw,
                sn[e.baixa_portal], e.data_baixa_portal, sn[e.devolucao], e.nfd, e.obs_devolucao,
-               sn[e.retencao_palets], e.qtd_palets or None, e.observacao, e.criado_por, e.criado_em]
+               sn[e.retencao_palets], e.qtd_palets or None, e.observacao, e.criado_por, e.criado_em,
+               sn[e.concluido], e.concluido_em, e.concluido_por]
               for e in itens]
     info = [("Registros:", str(len(itens))), ("Período:", _periodo_texto(de, ate)),
+            ("Situação:", {"abertos": "em aberto", "arquivo": "arquivo (concluídas)"}.get(situacao, "todas")),
             ("Gerado em:", datetime.datetime.now(BRASILIA).date())]
     conteudo = criar_planilha("Controle GDC", "Entregas da operação GDC", colunas, linhas, info=info, aba="Controle GDC")
     return resposta_xlsx(conteudo, f"controle_gdc_{datetime.datetime.now(BRASILIA):%Y-%m-%d}.xlsx")

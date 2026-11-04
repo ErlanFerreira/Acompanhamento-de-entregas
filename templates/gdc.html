@@ -18,7 +18,7 @@
   {% endif %}
 
   <section class="kpis gdc-kpis">
-    <div class="stat-tile"><div class="label">Lançamentos</div><div class="value" id="k-total">—</div><div class="sub">no filtro atual</div></div>
+    <div class="stat-tile"><div class="label">Lançamentos</div><div class="value" id="k-total">—</div><div class="sub" id="k-total-sub">em aberto</div></div>
     <button type="button" class="stat-tile warning" data-filtro="baixado" data-valor="nao"><div class="label">Manifestos não baixados</div><div class="value" id="k-nao-baixados">—</div><div class="sub">clique para filtrar</div></button>
     <button type="button" class="stat-tile serious" data-filtro="devolucao" data-valor="sim"><div class="label">Com devolução</div><div class="value" id="k-devolucoes">—</div><div class="sub">clique para filtrar</div></button>
     <button type="button" class="stat-tile critical" data-filtro="retencao" data-valor="sim"><div class="label">Retenção de paletes</div><div class="value" id="k-retencoes">—</div><div class="sub" id="k-palets">clique para filtrar</div></button>
@@ -44,23 +44,15 @@
 
   <section class="table-section">
     <div class="table-toolbar">
-      <h2>Entregas lançadas</h2>
+      <div class="gdc-abas" role="tablist">
+        <button type="button" class="gdc-aba ativa" data-aba="abertos" role="tab">Em aberto <span class="gdc-aba-n" id="aba-abertos"></span></button>
+        <button type="button" class="gdc-aba" data-aba="arquivo" role="tab">Arquivo <span class="gdc-aba-n" id="aba-arquivo"></span></button>
+      </div>
       <span class="count" id="gdc-count"></span>
       <span class="filters-spacer"></span>
       <button type="button" class="btn" id="btn-exportar">⬇ Exportar Excel</button>
     </div>
-    <div class="table-scroll gdc-scroll">
-      <table class="detail gdc-tabela">
-        <colgroup>
-          <col class="c-data"><col class="c-guia"><col class="c-nf"><col><col class="c-manifesto">
-          <col class="c-baixa"><col class="c-baixa"><col class="c-baixa"><col class="c-dev"><col class="c-palets"><col class="c-acoes">
-        </colgroup>
-        <thead>
-          <tr><th>Data</th><th>Guia</th><th>Notas fiscais</th><th>Destinatário / cidade</th><th>Manifesto</th><th>Baixa manifesto</th><th>Baixa GW</th><th>Baixa portal GDC</th><th>Devolução</th><th>Paletes retidos</th><th></th></tr>
-        </thead>
-        <tbody id="gdc-body"><tr><td colspan="11"><div class="empty-state">Carregando…</div></td></tr></tbody>
-      </table>
-    </div>
+    <div class="gdc-cards" id="gdc-cards"><div class="empty-state">Carregando…</div></div>
     <div class="pagination" id="gdc-paginacao" hidden>
       <button type="button" class="btn" id="pg-anterior">‹ Anterior</button>
       <span id="pg-info"></span>
