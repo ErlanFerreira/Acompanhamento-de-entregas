@@ -55,13 +55,19 @@
       itens = r.itens;
       render(r);
     } catch (e) {
-      $("gdc-body").innerHTML = '<tr><td colspan="13"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
+      $("gdc-body").innerHTML = '<tr><td colspan="11"><div class="empty-state">' + esc(e.message) + '</div></td></tr>';
     }
   }
 
   function simNao(v, ruim) {
     return v ? '<span class="bip-tag ' + (ruim ? "gdc-ruim" : "faturado") + '">Sim</span>'
              : '<span class="bip-tag ' + (ruim ? "gdc-neutro" : "gdc-pendente") + '">Não</span>';
+  }
+
+  // Texto longo é cortado com "…" (o completo aparece ao passar o mouse) --
+  // a tabela tem largura fixa (static/app.css, .gdc-tabela), sem rolagem lateral.
+  function corta(texto, classe) {
+    return '<div class="gdc-corta ' + classe + '" title="' + esc(texto) + '">' + esc(texto) + '</div>';
   }
 
   function devolucao(e) {
@@ -89,24 +95,25 @@
     const tbody = $("gdc-body");
     if (!itens.length) {
       const filtrado = [...parametros().keys()].length;
-      tbody.innerHTML = '<tr><td colspan="13"><div class="empty-state">' +
+      tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state">' +
         (filtrado ? "Nenhum lançamento com esses filtros." : 'Nenhuma entrega lançada ainda. Clique em "+ Nova entrega".') + '</div></td></tr>';
       return;
     }
     tbody.innerHTML = itens.map((e, i) =>
       '<tr>' +
       '<td class="num gdc-nowrap">' + fmtData(e.data) + '</td>' +
-      '<td class="gdc-nowrap"><strong>' + esc(e.guia) + '</strong></td>' +
+      '<td><div class="gdc-guia"><strong class="gdc-corta" title="' + esc(e.guia) + '">' + esc(e.guia) + '</strong>' +
+        (e.observacao ? '<span class="gdc-tem-obs" title="' + esc(e.observacao) + '">💬</span>' : "") + '</div></td>' +
       '<td class="num gdc-nfs">' + (e.notas.length ? esc(e.notas.join(", ")) : '<span class="bip-muted">—</span>') + '</td>' +
-      '<td>' + esc(e.destinatario) + '</td>' +
-      '<td>' + esc(e.cidade) + '</td>' +
+      '<td>' + corta(e.destinatario, "") + (e.cidade ? corta(e.cidade, "gdc-cidade") : "") + '</td>' +
       '<td class="num">' + (e.manifesto ? esc(e.manifesto) : '<span class="bip-muted">—</span>') + '</td>' +
-      BAIXAS.map(b => '<td class="gdc-nowrap">' + simNao(e[b.campo], false) +
-        (e[b.data] ? ' <span class="gdc-nfd">' + fmtData(e[b.data]) + '</span>' : "") + '</td>').join("") +
+      // Na tabela a data da baixa sai só com dia/mês (a completa fica no "title").
+      BAIXAS.map(b => '<td class="gdc-nowrap"' + (e[b.data] ? ' title="Baixado em ' + fmtData(e[b.data]) + '"' : "") + '>' +
+        simNao(e[b.campo], false) + (e[b.data] ? ' <span class="gdc-nfd">' + fmtData(e[b.data]).slice(0, 5) + '</span>' : "") +
+        '</td>').join("") +
       '<td>' + devolucao(e) + '</td>' +
       '<td>' + (e.retencao_palets ? '<span class="bip-tag gdc-ruim">' + fmtN(e.qtd_palets) + '</span>' : '<span class="bip-tag gdc-neutro">Não</span>') + '</td>' +
-      '<td class="gdc-obs" title="' + esc(e.observacao) + '">' + esc(e.observacao) + '</td>' +
-      '<td class="bip-acoes"><button type="button" class="btn" data-editar="' + i + '">Editar</button> ' +
+      '<td class="bip-acoes"><button type="button" class="btn" data-editar="' + i + '" title="Editar lançamento">✎</button> ' +
       '<button type="button" class="btn" data-excluir="' + i + '" title="Excluir lançamento">✕</button></td>' +
       '</tr>').join("");
     tbody.querySelectorAll("[data-editar]").forEach(b => b.addEventListener("click", () => abrir(itens[+b.dataset.editar])));

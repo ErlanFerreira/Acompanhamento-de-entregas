@@ -50,11 +50,15 @@
       <button type="button" class="btn" id="btn-exportar">⬇ Exportar Excel</button>
     </div>
     <div class="table-scroll gdc-scroll">
-      <table class="detail">
+      <table class="detail gdc-tabela">
+        <colgroup>
+          <col class="c-data"><col class="c-guia"><col class="c-nf"><col><col class="c-manifesto">
+          <col class="c-baixa"><col class="c-baixa"><col class="c-baixa"><col class="c-dev"><col class="c-palets"><col class="c-acoes">
+        </colgroup>
         <thead>
-          <tr><th>Data</th><th>Guia</th><th>Notas fiscais</th><th>Destinatário</th><th>Cidade</th><th>Manifesto</th><th>Manifesto baixado</th><th>Baixa GW</th><th>Baixa portal GDC</th><th>Devolução</th><th>Paletes retidos</th><th>Observação</th><th></th></tr>
+          <tr><th>Data</th><th>Guia</th><th>Notas fiscais</th><th>Destinatário / cidade</th><th>Manifesto</th><th>Baixa manifesto</th><th>Baixa GW</th><th>Baixa portal GDC</th><th>Devolução</th><th>Paletes retidos</th><th></th></tr>
         </thead>
-        <tbody id="gdc-body"><tr><td colspan="13"><div class="empty-state">Carregando…</div></td></tr></tbody>
+        <tbody id="gdc-body"><tr><td colspan="11"><div class="empty-state">Carregando…</div></td></tr></tbody>
       </table>
     </div>
     <div class="pagination" id="gdc-paginacao" hidden>
