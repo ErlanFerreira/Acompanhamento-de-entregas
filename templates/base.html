@@ -26,6 +26,7 @@
       {% if pode_ver_tela(request, 'gdc') %}<a href="/gdc" class="nav-link {{ 'active' if active == 'gdc' else '' }}">Controle GDC</a>{% endif %}
       {% if pode_ver_tela(request, 'consultas') %}<a href="/consultas" class="nav-link {{ 'active' if active == 'consultas' else '' }}">Consulta de Notas</a>{% endif %}
       {% if pode_ver_tela(request, 'bipagem') %}<a href="/bipagem" class="nav-link {{ 'active' if active == 'bipagem' else '' }}">Emissão de Protocolo</a>{% endif %}
+      {% if pode_ver_tela(request, 'agendamento') %}<a href="/agendamento" class="nav-link {{ 'active' if active == 'agendamento' else '' }}">Agendamento</a>{% endif %}
       {% if pode_ver_tela(request, 'emissao') %}<a href="/emissao" class="nav-link {{ 'active' if active == 'emissao' else '' }}">Emissão de CT-e</a>{% endif %}
       {% if eh_supervisor(request) %}
       <a href="/usuarios" class="nav-link {{ 'active' if active == 'usuarios' else '' }}">Usuários</a>

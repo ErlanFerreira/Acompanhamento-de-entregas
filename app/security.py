@@ -159,6 +159,7 @@ TELAS = [
     ("consultas", "Consulta de Notas", "/consultas", True),
     ("bipagem", "Emissão de Protocolo", "/bipagem", True),
     ("emissao", "Emissão de CT-e", "/emissao", False),
+    ("agendamento", "Agendamento de Entregas", "/agendamento", False),
     ("sac", "Portal SAC", None, False),  # atalho externo no menu
 ]
 TELAS_CHAVES = [t[0] for t in TELAS]

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Agendamento de Entregas — Transrota{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/agendamento.css">{% endblock %}
+{% block content %}
+<div class="viz-root" data-analista="{{ (usuario_logado(request) or {}).get('nome', '') }}">
+  <header class="app-header">
+    <div>
+      <h1>Agendamento de Entregas</h1>
+      <p>Contato com o cliente antes da entrega (Fotus). Importe o XML das NFs: o telefone sai da observação da nota, a previsão vem do CT-e sincronizado e a mensagem abre pronta no WhatsApp. É só conferir e enviar.</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <label class="btn-primary ag-btn-arquivo" style="margin:0;">⬆ Importar XML das NFs<input type="file" id="ag-xml" accept=".xml,text/xml,application/xml" multiple hidden></label>
+      <button class="btn" id="btn-novo" type="button">+ Lançar manualmente</button>
+      <button class="theme-toggle" id="theme-toggle" type="button">🌓 Alternar tema</button>
+    </div>
+  </header>
+
+  <div class="bip-feedback" id="ag-aviso"></div>
+
+  <section class="kpis ag-kpis">
+    <button type="button" class="stat-tile" data-situacao="a_enviar"><div class="label">A enviar</div><div class="value" id="k-a_enviar">—</div><div class="sub">mensagem ainda não enviada</div></button>
+    <button type="button" class="stat-tile warning" data-situacao="aguardando"><div class="label">Aguardando resposta</div><div class="value" id="k-aguardando">—</div><div class="sub">enviada, sem resposta</div></button>
+    <button type="button" class="stat-tile serious" data-situacao="reagendar"><div class="label">Pediram outra data</div><div class="value" id="k-reagendar">—</div><div class="sub">reprogramar a entrega</div></button>
+    <button type="button" class="stat-tile ag-ok" data-situacao="confirmado"><div class="label">Confirmados</div><div class="value" id="k-confirmado">—</div><div class="sub">entrega combinada</div></button>
+    <button type="button" class="stat-tile critical" data-situacao="sem_contato"><div class="label">Sem contato</div><div class="value" id="k-sem_contato">—</div><div class="sub">telefone errado / não responde</div></button>
+  </section>
+
+  <details class="ag-bloco" id="ag-pendentes">
+    <summary>CT-e da Fotus ainda sem agendamento <span class="gdc-aba-n" id="ag-pendentes-n"></span></summary>
+    <p class="ag-dica">CT-e pendentes de entrega cujas NFs ainda não foram importadas aqui. Importe o XML da nota ou clique em <strong>Lançar</strong> para colar a observação.</p>
+    <div class="ag-tabela-wrap"><table class="detail ag-tabela">
+      <thead><tr><th>CT-e</th><th>NF</th><th>Destinatário</th><th>Cidade</th><th>Previsão</th><th></th></tr></thead>
+      <tbody id="ag-pendentes-corpo"><tr><td colspan="6" class="empty-state">Carregando…</td></tr></tbody>
+    </table></div>
+  </details>
+
+  <details class="ag-bloco" id="ag-modelo-bloco">
+    <summary>Modelo da mensagem</summary>
+    <p class="ag-dica">Campos trocados automaticamente: <code>{cliente}</code> <code>{nf}</code> <code>{cte}</code> <code>{data}</code> <code>{dia_semana}</code> <code>{cidade}</code> <code>{analista}</code>. Texto entre <code>*asteriscos*</code> sai em negrito no WhatsApp. O modelo fica salvo neste computador.</p>
+    <textarea id="ag-modelo" rows="7"></textarea>
+    <div style="display:flex; gap:8px; margin-top:8px;"><button type="button" class="btn" id="ag-modelo-padrao">Voltar ao modelo padrão</button></div>
+  </details>
+
+  <section class="filters">
+    <input type="text" id="f-busca" placeholder="Buscar NF, CT-e, cliente, cidade, telefone…">
+    <div class="filter-group"><span class="filter-label">Situação</span>
+      <select id="f-situacao">
+        <option value="andamento">Em andamento (todas menos concluídas)</option>
+        <option value="a_enviar">A enviar</option>
+        <option value="aguardando">Aguardando resposta</option>
+        <option value="reagendar">Pediram outra data</option>
+        <option value="confirmado">Confirmados</option>
+        <option value="sem_contato">Sem contato</option>
+        <option value="concluido">Concluídos</option>
+      </select></div>
+    <span class="filters-spacer"></span>
+    <span class="count" id="ag-count"></span>
+  </section>
+
+  <section class="table-section">
+    <div class="gdc-cards" id="ag-cards"><div class="empty-state">Carregando…</div></div>
+  </section>
+</div>
+
+<div class="modal-overlay" id="ag-modal" hidden>
+  <form class="modal-card gdc-modal" id="ag-form" role="dialog" aria-modal="true" aria-labelledby="ag-titulo" novalidate>
+    <div class="comp-trat-topo">
+      <h3 id="ag-titulo">Lançar agendamento</h3>
+      <button type="button" class="btn" id="ag-fechar" aria-label="Fechar">✕</button>
+    </div>
+    <div class="gdc-campos">
+      <label>Número da NF<input type="text" id="a-nf" maxlength="20" required autocomplete="off" inputmode="numeric"></label>
+      <label>Data prevista da entrega<input type="date" id="a-prevista"></label>
+      <label class="gdc-largo">Cliente (recebedor)<input type="text" id="a-cliente" maxlength="200"></label>
+      <label>Cidade<input type="text" id="a-cidade" maxlength="120"></label>
+      <label>Telefone (WhatsApp)<input type="text" id="a-telefone" maxlength="25" placeholder="(81) 99999-8888" autocomplete="off"></label>
+    </div>
+    <label>Observação da NF (cole aqui — o telefone é encontrado sozinho)<textarea id="a-obs" rows="4" maxlength="4000"></textarea></label>
+    <div class="ag-fones" id="a-fones"></div>
+    <div id="a-resposta" hidden>
+      <div class="comp-trat-sec">Resposta do cliente</div>
+      <div class="gdc-campos">
+        <label>Situação<select id="a-situacao">
+          <option value="a_enviar">A enviar</option>
+          <option value="aguardando">Aguardando resposta</option>
+          <option value="confirmado">Confirmou</option>
+          <option value="reagendar">Pediu outra data</option>
+          <option value="sem_contato">Sem contato</option>
+          <option value="concluido">Concluído</option>
+        </select></label>
+        <label>Data pedida pelo cliente<input type="date" id="a-combinada"></label>
+      </div>
+    </div>
+    <label>Anotação<textarea id="a-anotacao" rows="2" maxlength="4000" placeholder="Ex.: receber só à tarde, falar com o Sr. João…"></textarea></label>
+    <div class="modal-error" id="ag-erro"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="ag-cancelar">Cancelar</button>
+      <button type="submit" class="btn-primary" id="ag-salvar">Salvar</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-overlay" id="ag-data-modal" hidden>
+  <form class="modal-card gdc-modal" id="ag-data-form" role="dialog" aria-modal="true" aria-labelledby="ag-data-titulo" novalidate style="max-width:380px;">
+    <h3 id="ag-data-titulo">Cliente pediu outra data</h3>
+    <label>Nova data<input type="date" id="ag-data-nova" required></label>
+    <label>Anotação (opcional)<textarea id="ag-data-obs" rows="2" maxlength="4000" placeholder="Ex.: só depois das 14h"></textarea></label>
+    <div class="modal-error" id="ag-data-erro"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="ag-data-cancelar">Cancelar</button>
+      <button type="submit" class="btn-primary">Salvar</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/agendamento.js"></script>
+{% endblock %}

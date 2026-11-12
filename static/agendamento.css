@@ -1,0 +1,44 @@
+/* ---- Agendamento de Entregas (usa os cards do Controle GDC) ---- */
+section.kpis.ag-kpis { grid-template-columns: repeat(5, 1fr); }
+.stat-tile.ag-ok .value { color: var(--status-good); }
+.ag-btn-arquivo { display: inline-flex; align-items: center; cursor: pointer; }
+#ag-aviso { margin: -6px 0 16px; }
+
+.ag-bloco { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
+.ag-bloco > summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--text-primary); }
+.ag-bloco[open] > summary { margin-bottom: 8px; }
+.ag-bloco textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface-2, var(--surface-1)); color: var(--text-primary); resize: vertical; }
+.ag-dica { font-size: 12.5px; color: var(--text-muted); margin: 0 0 8px; }
+.ag-dica code { font-size: 12px; }
+.ag-tabela-wrap { max-height: 360px; overflow: auto; }
+table.ag-tabela th { cursor: default; }
+table.ag-tabela td .btn { padding: 3px 10px; }
+.ag-atrasada { color: var(--status-critical); font-weight: 600; }
+
+.gdc-selo.ag-selo-ok { background: var(--status-good); }
+.gdc-selo.ag-selo-aviso { background: var(--status-warning); color: #241a00; }
+.gdc-selo.ag-selo-serio { background: var(--status-serious); }
+.gdc-selo.ag-selo-critico { background: var(--status-critical); }
+.gdc-selo.ag-selo-neutro { background: var(--gridline); color: var(--text-secondary); }
+
+.ag-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ag-btn-whats { background: #25d366; border-color: #1fb457; color: #06351a; font-weight: 700; }
+.ag-btn-whats:hover { background: #1fb457; color: #06351a; }
+.ag-btn-ok { color: var(--success-text); border-color: color-mix(in srgb, var(--status-good) 55%, transparent); font-weight: 600; }
+.ag-btn-ok:hover { color: var(--success-text); background: color-mix(in srgb, var(--status-good) 12%, transparent); }
+
+.ag-fone-alt { font: inherit; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border);
+  background: transparent; color: var(--accent); cursor: pointer; }
+.ag-fone-alt:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ag-fones { font-size: 12.5px; color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ag-fones:empty { display: none; }
+
+.ag-obs { margin-top: 8px; font-size: 12.5px; color: var(--text-secondary); }
+.ag-obs > summary { cursor: pointer; color: var(--text-muted); }
+.ag-obs > div { margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: var(--gridline); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.gdc-modal select { font: inherit; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
+
+@media (max-width: 1100px) { section.kpis.ag-kpis { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { section.kpis.ag-kpis { grid-template-columns: repeat(2, 1fr); } }

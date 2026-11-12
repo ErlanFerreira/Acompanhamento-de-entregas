@@ -22,7 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, undefer
 
 from . import chave_cte, config, relatorios_bipagem, tipos_cte
-from . import bloqueio_login, escopo, gdc, historico, planilha_marca
+from . import agendamento, bloqueio_login, escopo, gdc, historico, planilha_marca
 from .logistica import classificar as classificar_logistica
 from .prazo_comprovante import prazo_comprovante
 from .db import get_db
@@ -85,6 +85,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(historico.router)
 app.include_router(gdc.router)
+app.include_router(agendamento.router)
 app.include_router(planilha_marca.router)
 
 
@@ -267,6 +268,11 @@ def historico_page(request: Request):
 @app.get("/gdc", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("gdc"))])
 def gdc_page(request: Request):
     return templates.TemplateResponse("gdc.html", {"request": request, "active": "gdc", "banco_proprio": gdc.BANCO_PROPRIO})
+
+
+@app.get("/agendamento", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("agendamento"))])
+def agendamento_page(request: Request):
+    return templates.TemplateResponse("agendamento.html", {"request": request, "active": "agendamento"})
 
 
 @app.get("/comprovantes", response_class=HTMLResponse, dependencies=[Depends(exigir_tela_page("comprovantes"))])
