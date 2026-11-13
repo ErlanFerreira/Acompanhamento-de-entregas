@@ -7,3 +7,6 @@ robo_emissao.log
 venv/
 .venv/
 .claude/
+agendamento_xml_vistos.json
+agendamento_xml_vistos.tmp
+agendamento_xml.log

@@ -273,6 +273,27 @@ Pelo GitHub (robô desligado), as emissões rodam uma por vez (`concurrency` do 
   `GW_BOT_ORGANIZACAO` com o CNPJ da certa (sem ele, o robô para avisando,
   em vez de escolher sozinho).
 
+## Agendamento de Entregas (Fotus)
+
+Tela `/agendamento` (`app/agendamento.py`), liberada por analista em
+**Usuários** ("Agendamento de Entregas"). Para os clientes que exigem contato
+antes da entrega (hoje a Fotus -- `CLIENTES`), junta o telefone da observação
+da NF-e (`infCpl`) com o CT-e e a previsão sincronizados e abre o WhatsApp
+(link `wa.me`) com a mensagem pronta; a resposta do cliente é marcada na tela.
+Tabela `agendamentos_entrega` no banco separado (`CONSULTAS_DATABASE_URL`).
+
+**XML entram sozinhos de uma pasta:** `scripts/importar_xml_agendamento.py`
+roda num PC que enxerga a pasta dos XML (local ou de rede) e a cada minuto
+importa os XML novos/alterados (com subpastas) das NFs da Fotus -- os outros
+são ignorados. Só lê a pasta (não move nem apaga nada); os arquivos já vistos
+ficam em `agendamento_xml_vistos.json` e o log em `agendamento_xml.log`.
+No `.env` desse PC: `AGENDAMENTO_PASTA_XML` (a pasta), `DATABASE_URL` e
+`CONSULTAS_DATABASE_URL` (os mesmos da Vercel). Para ligar: dois cliques em
+`scripts\importar_xml_agendamento.bat` e deixar a janela aberta (ou pelo
+Agendador de Tarefas do Windows com `--uma-vez`). Na primeira vez só pega os
+arquivos dos últimos 30 dias (`--dias N` muda). A tela também aceita importar
+XML à mão ou colar a observação.
+
 ## Estrutura do projeto
 
 ```

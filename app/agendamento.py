@@ -76,16 +76,20 @@ _tabelas_ok = False
 _tabelas_lock = threading.Lock()
 
 
-def get_ag_db():
-    """As tabelas são criadas na primeira vez que alguém usa a tela (a função
-    da Vercel pode subir sem rodar o seed). A tela abre fazendo duas chamadas
-    ao mesmo tempo -- a trava evita as duas tentarem criar a tabela juntas."""
+def preparar_tabelas() -> None:
     global _tabelas_ok
     if not _tabelas_ok:
         with _tabelas_lock:
             if not _tabelas_ok:
                 AgBase.metadata.create_all(bind=engine_ag)
                 _tabelas_ok = True
+
+
+def get_ag_db():
+    """As tabelas são criadas na primeira vez que alguém usa a tela (a função
+    da Vercel pode subir sem rodar o seed). A tela abre fazendo duas chamadas
+    ao mesmo tempo -- a trava evita as duas tentarem criar a tabela juntas."""
+    preparar_tabelas()
     db = SessionAg()
     try:
         yield db
@@ -229,6 +233,12 @@ def _carga_dict(c: Carga | None) -> dict | None:
             "destinatario": c.destinatario, "cidade": c.cidade_dest, "uf": c.uf_dest}
 
 
+def eh_cliente_agendado(nome_emitente: str) -> bool:
+    """NF de um remetente que exige agendamento (CLIENTES)?"""
+    nome = (nome_emitente or "").upper()
+    return any(c in nome for c in CLIENTES)
+
+
 def _filtro_clientes():
     return or_(*[func.upper(Carga.remetente).like(f"%{c}%") for c in CLIENTES])
 
@@ -252,15 +262,16 @@ def _to_dict(a: Agendamento, carga: Carga | None = None) -> dict:
     }
 
 
-def _gravar_novo(db_ag: Session, db: Session, request: Request, dados: dict) -> tuple[Agendamento, bool]:
+def gravar(db_ag: Session, db: Session, quem: str, dados: dict) -> tuple[Agendamento, bool]:
     """Cria (ou completa, se a NF já foi importada) um agendamento. Devolve
-    (agendamento, novo?)."""
+    (agendamento, novo?). Usado pela tela e pela importação automática da
+    pasta de XML (scripts/importar_xml_agendamento.py)."""
     nf = re.sub(r"\D", "", dados.get("nf") or "").lstrip("0")[:20]
     cnpj = re.sub(r"\D", "", dados.get("cnpj_emitente") or "")[:14]
     a = db_ag.query(Agendamento).filter(Agendamento.nf == nf, Agendamento.cnpj_emitente == cnpj).first()
     novo = a is None
     if novo:
-        a = Agendamento(nf=nf, cnpj_emitente=cnpj, criado_em=_agora(), criado_por=_quem(request), situacao="a_enviar")
+        a = Agendamento(nf=nf, cnpj_emitente=cnpj, criado_em=_agora(), criado_por=quem[:120], situacao="a_enviar")
         db_ag.add(a)
     obs = str(dados.get("observacao_nf") or "").strip()[:4000]
     fones = extrair_telefones(obs)
@@ -373,7 +384,7 @@ def api_importar_xml(request: Request, payload: dict, db_ag: Session = Depends(g
         if not dados["nf"]:
             resultado.append({"arquivo": nome, "erro": "XML sem número de NF."})
             continue
-        a, novo = _gravar_novo(db_ag, db, request, dados)
+        a, novo = gravar(db_ag, db, _quem(request), dados)
         db_ag.flush()
         resultado.append({"arquivo": nome, "nf": a.nf, "novo": novo, "telefone": a.telefone,
                           "vinculado": bool(a.id_cte)})
@@ -386,7 +397,7 @@ def api_criar(request: Request, payload: dict, db_ag: Session = Depends(get_ag_d
     """Lançamento manual: NF + observação colada (e o que mais vier)."""
     if not re.sub(r"\D", "", str(payload.get("nf") or "")):
         return JSONResponse({"erro": "Informe o número da NF."}, status_code=400)
-    a, _ = _gravar_novo(db_ag, db, request, payload)
+    a, _ = gravar(db_ag, db, _quem(request), payload)
     fone = normalizar_telefone(payload.get("telefone") or "")
     if fone:
         a.telefone = fone
