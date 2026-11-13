@@ -52,11 +52,12 @@
     confirmado: ["✓ Confirmado", "ok"],
     reagendar: ["Pediu outra data", "serio"],
     sem_contato: ["Sem contato", "critico"],
-    concluido: ["Concluído", "ok"],
+    concluido: ["Arquivado", "neutro"],
   };
   const HORAS_SEM_RESPOSTA = 24;
 
   let itens = [];
+  let aba = "andamento";    // "andamento" ou "concluido" (o Arquivo)
   let editando = null;      // agendamento em edição (null = novo)
   let reagendando = null;   // agendamento do modal de nova data
 
@@ -102,7 +103,7 @@
   let seq = 0;
   async function carregar() {
     const meu = ++seq;
-    const p = new URLSearchParams({ situacao: $("f-situacao").value });
+    const p = new URLSearchParams({ situacao: aba === "concluido" ? "concluido" : $("f-situacao").value });
     const busca = $("f-busca").value.trim();
     if (busca) p.set("busca", busca);
     try {
@@ -110,6 +111,9 @@
       if (meu !== seq) return;
       itens = r.itens;
       Object.keys(r.contagem).forEach(s => { const el = $("k-" + s); if (el) el.textContent = fmtN(r.contagem[s]); });
+      const arquivo = r.contagem.concluido || 0;
+      $("aba-concluido").textContent = fmtN(arquivo);
+      $("aba-andamento").textContent = fmtN(Object.values(r.contagem).reduce((t, n) => t + n, 0) - arquivo);
       render();
     } catch (e) {
       $("ag-cards").innerHTML = '<div class="empty-state">' + esc(e.message) + '</div>';
@@ -150,11 +154,11 @@
       ? '<button type="button" class="btn ag-btn-whats" data-enviar="' + i + '">💬 ' + (a.envios ? "Reenviar" : "Enviar") + ' no WhatsApp</button>'
       : "";
     const respostas = a.situacao === "concluido"
-      ? '<button type="button" class="btn" data-sit="aguardando" data-i="' + i + '">↺ Reabrir</button>'
+      ? (c && c.entregue ? "" : '<button type="button" class="btn" data-sit="aguardando" data-i="' + i + '" title="Volta para Em andamento">↺ Reabrir</button>')
       : (a.situacao !== "confirmado" ? '<button type="button" class="btn ag-btn-ok" data-sit="confirmado" data-i="' + i + '">✓ Confirmou</button>' : "") +
         '<button type="button" class="btn" data-reagendar="' + i + '">📅 Outra data</button>' +
         (a.situacao !== "sem_contato" ? '<button type="button" class="btn" data-sit="sem_contato" data-i="' + i + '">✗ Sem contato</button>' : "") +
-        '<button type="button" class="btn" data-sit="concluido" data-i="' + i + '" title="Sai da lista (entrega feita)">Concluir</button>';
+        '<button type="button" class="btn" data-sit="concluido" data-i="' + i + '" title="Manda para o Arquivo sem esperar a baixa do CT-e">Arquivar</button>';
     const obs = a.observacao_nf ? '<details class="ag-obs"><summary>Observação da NF</summary><div>' + esc(a.observacao_nf) + '</div></details>' : "";
     const anot = a.anotacao ? '<div class="gdc-card-obs">💬 ' + esc(a.anotacao) + '</div>' : "";
     return '<article class="gdc-card">' +
@@ -172,7 +176,7 @@
   function render() {
     $("ag-count").textContent = fmtN(itens.length) + " NF(s)";
     $("ag-cards").innerHTML = itens.length ? itens.map(card).join("")
-      : '<div class="empty-state">Nada aqui. Importe o XML das NFs ou lance manualmente.</div>';
+      : '<div class="empty-state">' + (aba === "concluido" ? "Nenhum agendamento no Arquivo ainda." : "Nada aqui. Importe o XML das NFs ou lance manualmente.") + '</div>';
   }
 
   // Mostra a mudança na hora e recarrega (contagens; o item pode sair do filtro).
@@ -252,7 +256,7 @@
       if (erros.length) msg += "<br>Não importados: " + erros.map(x => esc(x.arquivo + " — " + x.erro)).join("; ");
       aviso(msg, erros.length || semFone.length ? "aviso" : "ok");
       $("f-situacao").value = "andamento";
-      carregar(); carregarPendentes();
+      trocarAba("andamento"); carregarPendentes();
     } catch (e) { aviso(esc(e.message), "erro"); }
   });
 
@@ -363,7 +367,16 @@
 
   // ---------------------------------------------------- filtros/modelo ----
 
+  function trocarAba(nova) {
+    aba = nova;
+    document.querySelectorAll(".ag-abas [data-aba]").forEach(b => b.classList.toggle("ativa", b.dataset.aba === aba));
+    $("f-situacao-grupo").hidden = aba === "concluido";
+    carregar();
+  }
+  document.querySelectorAll(".ag-abas [data-aba]").forEach(b => b.addEventListener("click", () => trocarAba(b.dataset.aba)));
+
   document.querySelectorAll(".ag-kpis [data-situacao]").forEach(b => b.addEventListener("click", () => {
+    if (aba !== "andamento") trocarAba("andamento");
     const sel = $("f-situacao");
     sel.value = sel.value === b.dataset.situacao ? "andamento" : b.dataset.situacao;
     carregar();

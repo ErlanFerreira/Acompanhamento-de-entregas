@@ -3,6 +3,7 @@ section.kpis.ag-kpis { grid-template-columns: repeat(5, 1fr); }
 .stat-tile.ag-ok .value { color: var(--status-good); }
 .ag-btn-arquivo { display: inline-flex; align-items: center; cursor: pointer; }
 #ag-aviso { margin: -6px 0 16px; }
+.ag-abas { margin-bottom: 10px; }
 
 .ag-bloco { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; }
 .ag-bloco > summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--text-primary); }

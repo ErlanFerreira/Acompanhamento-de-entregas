@@ -41,17 +41,21 @@
     <div style="display:flex; gap:8px; margin-top:8px;"><button type="button" class="btn" id="ag-modelo-padrao">Voltar ao modelo padrão</button></div>
   </details>
 
+  <div class="gdc-abas ag-abas" role="tablist">
+    <button type="button" class="gdc-aba ativa" data-aba="andamento" role="tab">Em andamento <span class="gdc-aba-n" id="aba-andamento"></span></button>
+    <button type="button" class="gdc-aba" data-aba="concluido" role="tab" title="Entregues (vão sozinhos quando o CT-e é baixado) e concluídos à mão">Arquivo <span class="gdc-aba-n" id="aba-concluido"></span></button>
+  </div>
+
   <section class="filters">
     <input type="text" id="f-busca" placeholder="Buscar NF, CT-e, cliente, cidade, telefone…">
-    <div class="filter-group"><span class="filter-label">Situação</span>
+    <div class="filter-group" id="f-situacao-grupo"><span class="filter-label">Situação</span>
       <select id="f-situacao">
-        <option value="andamento">Em andamento (todas menos concluídas)</option>
+        <option value="andamento">Todas</option>
         <option value="a_enviar">A enviar</option>
         <option value="aguardando">Aguardando resposta</option>
         <option value="reagendar">Pediram outra data</option>
         <option value="confirmado">Confirmados</option>
         <option value="sem_contato">Sem contato</option>
-        <option value="concluido">Concluídos</option>
       </select></div>
     <span class="filters-spacer"></span>
     <span class="count" id="ag-count"></span>
@@ -86,7 +90,7 @@
           <option value="confirmado">Confirmou</option>
           <option value="reagendar">Pediu outra data</option>
           <option value="sem_contato">Sem contato</option>
-          <option value="concluido">Concluído</option>
+          <option value="concluido">Concluído (vai para o Arquivo)</option>
         </select></label>
         <label>Data pedida pelo cliente<input type="date" id="a-combinada"></label>
       </div>

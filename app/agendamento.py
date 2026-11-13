@@ -318,9 +318,38 @@ def _cargas_por_id(db: Session, ids: list[str]) -> dict[str, Carga]:
 TELA = "agendamento"
 
 
+def atualizar_abertos(db_ag: Session, db: Session) -> None:
+    """Põe em dia os agendamentos em andamento com o que a sincronização
+    trouxe: vincula o CT-e da NF importada antes de ele sincronizar e manda
+    pro Arquivo (situação "concluido") os que o CT-e já foi entregue."""
+    abertos = db_ag.query(Agendamento).filter(Agendamento.situacao != "concluido").all()
+    mudou = False
+    for a in abertos:
+        if not a.id_cte:
+            c = achar_carga(db, a.nf, a.cnpj_emitente)
+            if c:
+                a.id_cte, a.cte = c.id_cte, c.cte
+                a.data_prevista = a.data_prevista or _data(c.previsao)
+                mudou = True
+    ids = list({a.id_cte for a in abertos if a.id_cte})
+    entregues = set()
+    for i in range(0, len(ids), 500):
+        entregues |= {i_ for (i_,) in db.query(Carga.id_cte).filter(Carga.id_cte.in_(ids[i:i + 500]),
+                                                                     Carga.entregue.is_(True)).all()}
+    for a in abertos:
+        if a.id_cte in entregues:
+            a.situacao, a.atualizado_em = "concluido", _agora()
+            mudou = True
+    if mudou:
+        db_ag.commit()
+
+
 @router.get("/api/agendamento", dependencies=[Depends(exigir_tela_api(TELA))])
 def api_lista(situacao: str = "andamento", busca: str = "", db_ag: Session = Depends(get_ag_db),
               db: Session = Depends(banco.get_db)):
+    """`situacao`: "andamento" (todas menos o Arquivo), uma das SITUACOES ou
+    "concluido" (o Arquivo: entregues e concluídas à mão)."""
+    atualizar_abertos(db_ag, db)
     q = db_ag.query(Agendamento)
     if situacao == "andamento":
         q = q.filter(Agendamento.situacao != "concluido")
@@ -334,18 +363,11 @@ def api_lista(situacao: str = "andamento", busca: str = "", db_ag: Session = Dep
         if len(digitos) >= 4:
             condicoes.append(Agendamento.telefone.like(f"%{digitos}%"))
         q = q.filter(or_(*condicoes))
-    itens = q.order_by(Agendamento.data_prevista.is_(None), Agendamento.data_prevista, Agendamento.id).limit(500).all()
-    # NF importada antes do CT-e sincronizar: tenta vincular de novo.
-    mudou = False
-    for a in itens:
-        if not a.id_cte and a.situacao != "concluido":
-            c = achar_carga(db, a.nf, a.cnpj_emitente)
-            if c:
-                a.id_cte, a.cte = c.id_cte, c.cte
-                a.data_prevista = a.data_prevista or _data(c.previsao)
-                mudou = True
-    if mudou:
-        db_ag.commit()
+    if situacao == "concluido":
+        ordem = (Agendamento.atualizado_em.desc(), Agendamento.id.desc())  # arquivadas por último primeiro
+    else:
+        ordem = (Agendamento.data_prevista.is_(None), Agendamento.data_prevista, Agendamento.id)
+    itens = q.order_by(*ordem).limit(500).all()
     cargas = _cargas_por_id(db, [a.id_cte for a in itens])
     contagem = dict(db_ag.query(Agendamento.situacao, func.count(Agendamento.id)).group_by(Agendamento.situacao).all())
     return {"itens": [_to_dict(a, cargas.get(a.id_cte)) for a in itens],
