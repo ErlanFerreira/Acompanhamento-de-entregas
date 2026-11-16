@@ -287,8 +287,11 @@ roda num PC que enxerga a pasta dos XML (local ou de rede) e a cada minuto
 importa os XML novos/alterados (com subpastas) das NFs da Fotus -- os outros
 são ignorados. Só lê a pasta (não move nem apaga nada); os arquivos já vistos
 ficam em `agendamento_xml_vistos.json` e o log em `agendamento_xml.log`.
-No `.env` desse PC: `AGENDAMENTO_PASTA_XML` (a pasta), `DATABASE_URL` e
-`CONSULTAS_DATABASE_URL` (os mesmos da Vercel). Para ligar: dois cliques em
+Configuração em `.env.agendamento` (raiz do projeto, fora do Git; vale só pro
+script e tem prioridade sobre o `.env`, que continua no banco local de
+desenvolvimento): `AGENDAMENTO_PASTA_XML` (a pasta), `DATABASE_URL` e
+`CONSULTAS_DATABASE_URL` (os mesmos da Vercel). `--simular` mostra o que seria
+importado (NF, cliente, telefones achados) sem gravar nada. Para ligar: dois cliques em
 `scripts\importar_xml_agendamento.bat` e deixar a janela aberta (ou pelo
 Agendador de Tarefas do Windows com `--uma-vez`). Na primeira vez só pega os
 arquivos dos últimos 30 dias (`--dias N` muda). A tela também aceita importar

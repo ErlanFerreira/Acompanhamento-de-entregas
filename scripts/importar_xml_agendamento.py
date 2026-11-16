@@ -20,12 +20,16 @@ Uso (ou dois cliques em scripts/importar_xml_agendamento.bat):
     --dias      só arquivos alterados nos últimos N dias (padrão 30) --
                 evita importar o histórico inteiro na primeira vez
     --intervalo segundos entre as varreduras (padrão 60)
+    --simular   só mostra o que seria importado (NF, cliente, telefones
+                achados) -- não grava nada nem precisa dos bancos
 
-No .env deste PC:
-    AGENDAMENTO_PASTA_XML   pasta dos XML, ex.: \\\\servidor\\xml\\fotus
+Configuração em .env.agendamento (na raiz do projeto; vale só para este
+script e tem prioridade sobre o .env -- assim o .env de desenvolvimento do
+PC continua apontando pro banco local):
+    AGENDAMENTO_PASTA_XML   pasta dos XML, ex.: C:\\Users\\fulano\\Fotus_xml
     DATABASE_URL            banco principal (CT-e e previsão sincronizados)
     CONSULTAS_DATABASE_URL  banco separado (onde ficam os agendamentos)
-Os dois bancos são os mesmos da Vercel.
+Os dois bancos são os mesmos da Vercel. Sem o .env.agendamento, vale o .env.
 """
 
 import argparse
@@ -39,6 +43,11 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(RAIZ))
+
+from dotenv import load_dotenv  # noqa: E402
+
+# Antes de importar app.config (que lê o .env sem sobrescrever o que já veio).
+load_dotenv(RAIZ / ".env.agendamento", override=True)
 
 from app import agendamento, config  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
@@ -145,6 +154,33 @@ def varrer(pasta: Path, dias: int, vistos: dict) -> dict:
     return resumo
 
 
+def simular(pasta: Path, dias: int) -> None:
+    """Lê os XML e mostra o que seria importado, sem tocar em banco nenhum."""
+    limite = time.time() - dias * 86400
+    total = fotus = 0
+    for caminho in sorted(pasta.rglob("*")):
+        if caminho.suffix.lower() != ".xml" or not caminho.is_file() or caminho.stat().st_mtime < limite:
+            continue
+        total += 1
+        try:
+            dados = agendamento.ler_xml_nfe(_ler(caminho))
+        except (ET.ParseError, ValueError) as e:
+            logger.info("%s: ignorado (%s)", caminho.name, e)
+            continue
+        if not dados["nf"] or not agendamento.eh_cliente_agendado(dados["emitente"]):
+            logger.info("%s: ignorado (NF %s de %s)", caminho.name, dados["nf"], dados["emitente"] or "?")
+            continue
+        fotus += 1
+        fones = agendamento.extrair_telefones(dados["observacao_nf"])
+        extra = agendamento.normalizar_telefone(dados["fone_dest"])
+        if extra and extra not in fones:
+            fones.append(extra)
+        logger.info("%s: NF %s -- %s (%s/%s) -- telefone(s): %s | observação: %s", caminho.name, dados["nf"],
+                    dados["cliente"], dados["cidade"], dados["uf"], ", ".join(fones) or "NENHUM",
+                    dados["observacao_nf"] or "(vazia)")
+    logger.info("Simulação: %d XML, %d NF(s) da Fotus seriam importadas. Nada foi gravado.", total, fotus)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--pasta", default=os.environ.get("AGENDAMENTO_PASTA_XML", ""))
@@ -152,6 +188,7 @@ def main() -> int:
     parser.add_argument("--dias", type=int, default=30)
     parser.add_argument("--intervalo", type=int, default=60)
     parser.add_argument("--banco-local", action="store_true", help="aceita rodar sem os bancos da Vercel (teste)")
+    parser.add_argument("--simular", action="store_true", help="só mostra o que seria importado, sem gravar")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -165,8 +202,11 @@ def main() -> int:
     if not pasta.is_dir():
         logger.error("Pasta não encontrada (ou sem acesso): %s", pasta)
         return 2
+    if args.simular:
+        simular(pasta, args.dias)
+        return 0
     if not args.banco_local and (config.DATABASE_URL.startswith("sqlite") or not os.environ.get("CONSULTAS_DATABASE_URL")):
-        logger.error("Faltam DATABASE_URL e/ou CONSULTAS_DATABASE_URL no .env (os mesmos da Vercel) -- "
+        logger.error("Faltam DATABASE_URL e/ou CONSULTAS_DATABASE_URL no .env.agendamento (os mesmos da Vercel) -- "
                      "sem eles os agendamentos não chegam no painel.")
         return 2
 

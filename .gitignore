@@ -10,3 +10,4 @@ venv/
 agendamento_xml_vistos.json
 agendamento_xml_vistos.tmp
 agendamento_xml.log
+.env.agendamento
