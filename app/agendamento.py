@@ -121,6 +121,9 @@ DDDS = {
 _FONE_RE = re.compile(
     r"(?<!\d)(?:\+?\s?55[\s.-]*)?\(?\s?0?(\d{2})\s?\)?[\s.-]*(9?[\s.]?\d{4})[\s.-]*(\d{4})(?!\d)"
 )
+# Número logo depois de "CPF", "CNPJ", "CEP", "Agência", "Conta"... não é
+# telefone (CPF sem pontos tem 11 dígitos e parece celular).
+_NAO_FONE_RE = re.compile(r"(?i)\b(cpf|cnpj|cep|rg|ie|insc\w*|ag[eê]ncia|conta(\s+corrente)?|c/c|pedido)\W{0,4}$")
 # Palavras que indicam que o número é de contato (ganham prioridade).
 _PISTA_RE = re.compile(r"(?i)whats|zap|wpp|cel|fone|tel|contato|recebedor|respons|ligar")
 
@@ -152,7 +155,7 @@ def extrair_telefones(texto: str) -> list[str]:
     achados = []
     for m in _FONE_RE.finditer(texto or ""):
         fone = normalizar_telefone("".join(m.groups()))
-        if not fone:
+        if not fone or _NAO_FONE_RE.search(texto[max(0, m.start() - 20):m.start()]):
             continue
         perto = (texto[max(0, m.start() - 30):m.start()])
         achados.append((fone, eh_celular(fone), bool(_PISTA_RE.search(perto)), m.start()))

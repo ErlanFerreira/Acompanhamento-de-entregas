@@ -17,7 +17,7 @@ Uso (ou dois cliques em scripts/importar_xml_agendamento.bat):
 
     --pasta     pasta dos XML (padrão: AGENDAMENTO_PASTA_XML do .env)
     --uma-vez   varre uma vez e sai (pra rodar pelo Agendador de Tarefas)
-    --dias      só arquivos alterados nos últimos N dias (padrão 30) --
+    --dias      só arquivos que chegaram nos últimos N dias (padrão 30) --
                 evita importar o histórico inteiro na primeira vez
     --intervalo segundos entre as varreduras (padrão 60)
     --simular   só mostra o que seria importado (NF, cliente, telefones
@@ -72,6 +72,13 @@ def _salvar_vistos(vistos: dict) -> None:
     temp.replace(ARQUIVO_VISTOS)
 
 
+def _chegada(st) -> float:
+    """Quando o arquivo apareceu na pasta: XML copiado/baixado mantém a data
+    de alteração original (às vezes de meses atrás), mas ganha uma data de
+    criação nova -- vale a mais recente das duas."""
+    return max(st.st_mtime, getattr(st, "st_birthtime", st.st_ctime))
+
+
 def _assinatura(caminho: Path) -> str:
     st = caminho.stat()
     return f"{int(st.st_mtime)}:{st.st_size}"
@@ -97,7 +104,7 @@ def varrer(pasta: Path, dias: int, vistos: dict) -> dict:
             continue
         try:
             assinatura = _assinatura(caminho)
-            if caminho.stat().st_mtime < limite:
+            if _chegada(caminho.stat()) < limite:
                 continue
         except OSError:
             continue  # sumiu no meio da varredura
@@ -159,7 +166,7 @@ def simular(pasta: Path, dias: int) -> None:
     limite = time.time() - dias * 86400
     total = fotus = 0
     for caminho in sorted(pasta.rglob("*")):
-        if caminho.suffix.lower() != ".xml" or not caminho.is_file() or caminho.stat().st_mtime < limite:
+        if caminho.suffix.lower() != ".xml" or not caminho.is_file() or _chegada(caminho.stat()) < limite:
             continue
         total += 1
         try:
