@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import io
 import json
 import logging
@@ -19,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, undefer
+from sqlalchemy.orm import Session, defer, undefer
 
 from . import chave_cte, config, relatorios_bipagem, tipos_cte
 from . import agendamento, bloqueio_login, escopo, gdc, historico, planilha_marca
@@ -366,8 +367,22 @@ def api_cargas(
     busca = (busca or "").strip().lower()[:60] or None
     hoje = datetime.date.today().isoformat()
 
+    # ETag: o navegador que já tem esta versão (mesmo escopo, período e
+    # sincronização) recebe 304 sem o banco reler os CT-e -- recarregar a página
+    # ou voltar a um período já visto não gasta transferência da Neon.
+    etag = None
+    if not busca and validade:
+        escopo_txt = sorted(empresas) if empresas is not None else None
+        etag = '"' + hashlib.sha1(repr((escopo_txt, data_inicial, data_final, hoje, validade)).encode()).hexdigest()[:32] + '"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
+
     def gerar() -> bytes:
-        q = db.query(Carga)
+        # Sem as colunas que a tela não usa (CNPJ, endereço, redespacho...): menos bytes saindo do banco.
+        q = db.query(Carga).options(
+            defer(Carga.cte_redespacho), defer(Carga.cnpj_consignatario), defer(Carga.endereco_consignatario),
+            defer(Carga.cnpj_remetente), defer(Carga.tipo_conhecimento), defer(Carga.atualizado_em),
+        )
         total_q = db.query(func.count(Carga.id))
         if empresas is not None:
             filtro = _filtro_empresas(empresas)
@@ -398,7 +413,8 @@ def api_cargas(
         corpo = gerar()
     else:
         corpo = _cargas_cacheadas((frozenset(empresas) if empresas is not None else None, data_inicial, data_final, hoje), validade, gerar)
-    return Response(content=corpo, media_type="application/json")
+    cabecalhos = {"ETag": etag, "Cache-Control": "private, no-cache"} if etag else {}
+    return Response(content=corpo, media_type="application/json", headers=cabecalhos)
 
 
 # ------------------------------------------- tratativas de comprovante ----
