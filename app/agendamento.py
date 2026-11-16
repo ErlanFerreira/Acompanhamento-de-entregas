@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import Column, Date, DateTime, Integer, String, Text, UniqueConstraint, func, or_
+from sqlalchemy import Column, Date, DateTime, Integer, String, Text, UniqueConstraint, func, inspect, or_, text
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from . import db as banco
@@ -57,6 +57,9 @@ class Agendamento(AgBase):
     uf = Column(String(2), nullable=False, default="")
     telefone = Column(String(20), nullable=False, default="")  # 55 + DDD + número, só dígitos
     telefones = Column(Text, nullable=False, default="[]")  # JSON: todos os achados
+    # Quem atende no telefone (nome antes do número na observação: "CONTATO:
+    # ADRIAN(87) 9666-4917") -- pode não ser o destinatário da NF.
+    contato = Column(String(120), nullable=False, default="")
     observacao_nf = Column(Text, nullable=False, default="")
     data_prevista = Column(Date, nullable=True)
     situacao = Column(String(20), nullable=False, default="a_enviar", index=True)
@@ -75,6 +78,10 @@ class Agendamento(AgBase):
 _tabelas_ok = False
 _tabelas_lock = threading.Lock()
 
+# Colunas criadas depois que a tabela já existia -- `create_all` não altera
+# tabelas existentes.
+_COLUNAS_ADICIONADAS = {"contato": "VARCHAR(120) NOT NULL DEFAULT ''"}
+
 
 def preparar_tabelas() -> None:
     global _tabelas_ok
@@ -82,6 +89,12 @@ def preparar_tabelas() -> None:
         with _tabelas_lock:
             if not _tabelas_ok:
                 AgBase.metadata.create_all(bind=engine_ag)
+                existentes = {c["name"] for c in inspect(engine_ag).get_columns(Agendamento.__tablename__)}
+                se_nao_existe = "IF NOT EXISTS " if engine_ag.dialect.name == "postgresql" else ""
+                for nome, tipo in _COLUNAS_ADICIONADAS.items():
+                    if nome not in existentes:
+                        with engine_ag.begin() as conn:
+                            conn.execute(text(f"ALTER TABLE {Agendamento.__tablename__} ADD COLUMN {se_nao_existe}{nome} {tipo}"))
                 _tabelas_ok = True
 
 
@@ -165,6 +178,35 @@ def extrair_telefones(texto: str) -> list[str]:
             vistos.add(fone)
             saida.append(fone)
     return saida
+
+
+# Nome de quem atende, logo antes do telefone: "NO CONTATO: ADRIAN(87)
+# 9666-4917", "agendar com João whats 81 9...", "falar com Sr. Pedro cel ...".
+# Primeiro tira do fim o que fica entre o nome e o número ("whats", "cel:",
+# "(", " - "), depois pega até 3 palavras depois de "contato/com/sr...".
+_RABO_RE = re.compile(
+    r"(?i)[\s:\-(/|.,]*(?:\b(?:whats\w*|zap|wpp|cel\w*|tel\w*|fone|n[ºo°]|numero|número)\b[\s:\-(/|.,]*)*$"
+)
+_NOME_RE = re.compile(
+    r"(?i)\b(?:contato|falar\s+com|ligar\s+para|com|recebedor|respons[aá]vel|sr|sra|dona|seu)\.?\s*[:\-]?\s*"
+    r"([A-Za-zÀ-ÿ]{2,}(?:\s+(?:d[aeo]s?\s+)?[A-Za-zÀ-ÿ]{2,}){0,2})$"
+)
+_NAO_NOME = {"o", "a", "cliente", "entrega", "contato", "recebedor", "responsavel", "responsável", "ele", "ela",
+             "antecedencia", "antecedência", "destinatario", "destinatário", "motorista", "transportadora"}
+
+
+def nome_contato(texto: str, fone: str) -> str:
+    """Nome escrito logo antes do telefone `fone` no texto ("" se não houver)."""
+    for m in _FONE_RE.finditer(texto or ""):
+        if normalizar_telefone("".join(m.groups())) != fone:
+            continue
+        antes = _RABO_RE.sub("", texto[max(0, m.start() - 60):m.start()])
+        achado = _NOME_RE.search(antes)
+        if achado:
+            nome = " ".join(achado.group(1).split())
+            if nome.split()[0].lower() not in _NAO_NOME:
+                return nome[:120]
+    return ""
 
 
 # ----------------------------------------------------------------- XML ----
@@ -252,7 +294,8 @@ def _to_dict(a: Agendamento, carga: Carga | None = None) -> dict:
     return {
         "id": a.id, "nf": a.nf, "cnpj_emitente": a.cnpj_emitente, "emitente": a.emitente, "chave": a.chave,
         "id_cte": a.id_cte, "cte": a.cte, "cliente": a.cliente, "cidade": a.cidade, "uf": a.uf,
-        "telefone": a.telefone, "telefones": json.loads(a.telefones or "[]"), "observacao_nf": a.observacao_nf,
+        "telefone": a.telefone, "telefones": json.loads(a.telefones or "[]"), "contato": a.contato or "",
+        "observacao_nf": a.observacao_nf,
         "data_prevista": a.data_prevista.isoformat() if a.data_prevista else None,
         "situacao": a.situacao,
         "data_combinada": a.data_combinada.isoformat() if a.data_combinada else None,
@@ -292,6 +335,8 @@ def gravar(db_ag: Session, db: Session, quem: str, dados: dict) -> tuple[Agendam
         a.telefones = json.dumps(fones)
     if fones and not a.telefone:
         a.telefone = fones[0]
+    if not a.contato and a.telefone:
+        a.contato = nome_contato(a.observacao_nf, a.telefone)
     carga = achar_carga(db, nf, cnpj)
     if carga:
         a.id_cte, a.cte = carga.id_cte, carga.cte
@@ -328,6 +373,9 @@ def atualizar_abertos(db_ag: Session, db: Session) -> None:
     abertos = db_ag.query(Agendamento).filter(Agendamento.situacao != "concluido").all()
     mudou = False
     for a in abertos:
+        if not a.contato and a.telefone and a.observacao_nf:  # importadas antes de existir o campo
+            a.contato = nome_contato(a.observacao_nf, a.telefone)
+            mudou = mudou or bool(a.contato)
         if not a.id_cte:
             c = achar_carga(db, a.nf, a.cnpj_emitente)
             if c:
@@ -362,7 +410,7 @@ def api_lista(situacao: str = "andamento", busca: str = "", db_ag: Session = Dep
     if busca:
         termo, digitos = f"%{busca}%", re.sub(r"\D", "", busca)
         condicoes = [Agendamento.nf.like(termo), Agendamento.cte.like(termo), Agendamento.cliente.ilike(termo),
-                     Agendamento.cidade.ilike(termo)]
+                     Agendamento.cidade.ilike(termo), Agendamento.contato.ilike(termo)]
         if len(digitos) >= 4:
             condicoes.append(Agendamento.telefone.like(f"%{digitos}%"))
         q = q.filter(or_(*condicoes))
@@ -426,14 +474,19 @@ def api_criar(request: Request, payload: dict, db_ag: Session = Depends(get_ag_d
     fone = normalizar_telefone(payload.get("telefone") or "")
     if fone:
         a.telefone = fone
+    contato = " ".join(str(payload.get("contato") or "").split())[:120]
+    a.contato = contato or nome_contato(a.observacao_nf, a.telefone)
     db_ag.commit()
     return _to_dict(a, _cargas_por_id(db, [a.id_cte]).get(a.id_cte))
 
 
 @router.post("/api/agendamento/extrair", dependencies=[Depends(exigir_tela_api(TELA))])
 def api_extrair(payload: dict):
-    """Prévia dos telefones achados num texto (o formulário mostra ao colar)."""
-    return {"telefones": extrair_telefones(str(payload.get("texto") or "")[:4000])}
+    """Prévia dos telefones achados num texto (o formulário mostra ao colar),
+    com o nome de quem atende em cada um, quando escrito antes do número."""
+    texto = str(payload.get("texto") or "")[:4000]
+    fones = extrair_telefones(texto)
+    return {"telefones": fones, "contatos": {f: nome_contato(texto, f) for f in fones}}
 
 
 @router.put("/api/agendamento/{ag_id}", dependencies=[Depends(exigir_tela_api(TELA))])
@@ -451,6 +504,11 @@ def api_editar(request: Request, ag_id: int, payload: dict, db_ag: Session = Dep
     if "observacao_nf" in payload:
         a.observacao_nf = str(payload.get("observacao_nf") or "").strip()[:4000]
         a.telefones = json.dumps(extrair_telefones(a.observacao_nf))
+    if "contato" in payload:
+        a.contato = " ".join(str(payload.get("contato") or "").split())[:120]
+    elif "telefone" in payload or "observacao_nf" in payload:
+        # Trocou o número: o nome é o escrito antes dele (ou nenhum).
+        a.contato = nome_contato(a.observacao_nf, a.telefone)
     for campo, limite in (("cliente", 200), ("cidade", 120)):
         if campo in payload:
             setattr(a, campo, " ".join(str(payload.get(campo) or "").split())[:limite])

@@ -36,9 +36,12 @@
   const raiz = document.querySelector(".viz-root");
   const ANALISTA = (raiz.dataset.analista || "").trim().split(/\s+/)[0] || "";
 
+  // {contato} = quem atende no telefone (nome antes do número na observação
+  // da NF); sem nome, vale o destinatário.
   const MODELO_PADRAO =
-    "Olá, {cliente}! Tudo bem?\n" +
-    "Aqui é {analista}, da *Transrota*, transportadora responsável pela entrega do seu pedido *Fotus* (NF {nf}).\n\n" +
+    "Olá, {contato}! Tudo bem?\n" +
+    "Aqui é {analista}, da *Transrota*. Temos uma entrega da *Fotus* em nome de *{cliente}* (NF {nf}), " +
+    "e este número está como contato para o recebimento.\n\n" +
     "A entrega está prevista para *{data} ({dia_semana})*, em {cidade}.\n\n" +
     "Podemos confirmar? Caso não tenha ninguém para receber nesse dia, por favor nos informe a melhor data.";
   const CHAVE_MODELO = "agendamento.modelo";
@@ -87,6 +90,7 @@
     const data = dataDoAgendamento(a);
     const valores = {
       cliente: nomeBonito(a.cliente) || "cliente",
+      contato: nomeBonito(a.contato) || nomeBonito(a.cliente) || "cliente",
       nf: a.nf, cte: a.cte || "",
       data: data ? fmtData(data) : "(data a combinar)",
       dia_semana: diaSemana(data),
@@ -143,7 +147,8 @@
       '<span title="Data da entrega" class="' + (atrasada ? "ag-atrasada" : "") + '">📅 ' +
         (a.data_combinada ? "Combinada " + fmtData(a.data_combinada) + " (" + diaSemana(a.data_combinada) + ")"
           : data ? "Previsão " + fmtData(data) + " (" + diaSemana(data) + ")" : "Sem previsão") + '</span>',
-      a.telefone ? '<span title="Telefone">📱 ' + esc(fmtFone(a.telefone)) + '</span>' : "",
+      a.telefone ? '<span title="Telefone (WhatsApp)">📱 ' + esc(fmtFone(a.telefone)) +
+        (a.contato ? ' — <strong title="Quem atende (da observação da NF)">' + esc(nomeBonito(a.contato)) + '</strong>' : "") + '</span>' : "",
       outrosFones.length ? '<span title="Outros telefones na observação da NF">☎ outros: ' +
         outrosFones.map(f => '<button type="button" class="ag-fone-alt" data-usar-fone="' + i + '" data-fone="' + f + '">' + esc(fmtFone(f)) + '</button>').join(" ") + '</span>' : "",
       a.envios ? '<span title="Último envio">✉ ' + (a.envios > 1 ? a.envios + " envios, último " : "Enviado ") + fmtDataHora(a.enviado_em) +
@@ -264,6 +269,7 @@
 
   const modal = $("ag-modal");
   let tExtrair = null;
+  let contatosPrevia = {};  // telefone -> nome escrito antes dele na observação
 
   function mostrarFones(lista) {
     $("a-fones").innerHTML = lista.length
@@ -274,17 +280,26 @@
 
   $("a-obs").addEventListener("input", () => {
     clearTimeout(tExtrair);
-    tExtrair = setTimeout(async () => {
-      try {
-        const r = await api("/api/agendamento/extrair", { method: "POST", body: JSON.stringify({ texto: $("a-obs").value }) });
-        mostrarFones(r.telefones);
-        if (!$("a-telefone").value.trim() && r.telefones.length) $("a-telefone").value = fmtFone(r.telefones[0]);
-      } catch (e) { /* prévia: sem problema */ }
-    }, 350);
+    tExtrair = setTimeout(() => previa(true), 350);
   });
+  // Telefones (e o nome de quem atende) achados na observação; `preencher`
+  // põe o primeiro no formulário quando o campo está vazio.
+  async function previa(preencher) {
+    try {
+      const r = await api("/api/agendamento/extrair", { method: "POST", body: JSON.stringify({ texto: $("a-obs").value }) });
+      contatosPrevia = r.contatos || {};
+      mostrarFones(r.telefones);
+      if (preencher && !$("a-telefone").value.trim() && r.telefones.length) {
+        $("a-telefone").value = fmtFone(r.telefones[0]);
+        if (!$("a-contato").value.trim()) $("a-contato").value = nomeBonito(contatosPrevia[r.telefones[0]] || "");
+      }
+    } catch (e) { /* prévia: sem problema */ }
+  }
   $("a-fones").addEventListener("click", ev => {
     const b = ev.target.closest("[data-fone]");
-    if (b) $("a-telefone").value = fmtFone(b.dataset.fone);
+    if (!b) return;
+    $("a-telefone").value = fmtFone(b.dataset.fone);
+    $("a-contato").value = nomeBonito(contatosPrevia[b.dataset.fone] || "");
   });
 
   let prefill = {};
@@ -298,6 +313,8 @@
     $("a-cliente").value = v.cliente || "";
     $("a-cidade").value = v.cidade || "";
     $("a-telefone").value = fmtFone(v.telefone || "");
+    $("a-contato").value = nomeBonito(v.contato || "");
+    contatosPrevia = {};
     $("a-prevista").value = (v.data_prevista || "").slice(0, 10);
     $("a-obs").value = v.observacao_nf || "";
     $("a-anotacao").value = v.anotacao || "";
@@ -305,6 +322,7 @@
     $("a-situacao").value = a ? a.situacao : "a_enviar";
     $("a-combinada").value = a && a.data_combinada ? a.data_combinada : "";
     mostrarFones(a ? a.telefones || [] : []);
+    if (a && a.observacao_nf) previa(false);
     erro("ag-erro", "");
     modal.hidden = false;
     (a ? $("a-telefone") : $("a-nf").value ? $("a-obs") : $("a-nf")).focus();
@@ -318,6 +336,7 @@
     ev.preventDefault();
     const dados = {
       cliente: $("a-cliente").value, cidade: $("a-cidade").value, telefone: $("a-telefone").value,
+      contato: $("a-contato").value,
       data_prevista: $("a-prevista").value || null, observacao_nf: $("a-obs").value, anotacao: $("a-anotacao").value,
     };
     try {

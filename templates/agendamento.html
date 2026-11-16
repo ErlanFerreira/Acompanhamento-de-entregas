@@ -36,7 +36,7 @@
 
   <details class="ag-bloco" id="ag-modelo-bloco">
     <summary>Modelo da mensagem</summary>
-    <p class="ag-dica">Campos trocados automaticamente: <code>{cliente}</code> <code>{nf}</code> <code>{cte}</code> <code>{data}</code> <code>{dia_semana}</code> <code>{cidade}</code> <code>{analista}</code>. Texto entre <code>*asteriscos*</code> sai em negrito no WhatsApp. O modelo fica salvo neste computador.</p>
+    <p class="ag-dica">Campos trocados automaticamente: <code>{contato}</code> (quem atende o telefone; sem nome na observação, o destinatário) <code>{cliente}</code> (destinatário da NF) <code>{nf}</code> <code>{cte}</code> <code>{data}</code> <code>{dia_semana}</code> <code>{cidade}</code> <code>{analista}</code>. Texto entre <code>*asteriscos*</code> sai em negrito no WhatsApp. O modelo fica salvo neste computador.</p>
     <textarea id="ag-modelo" rows="7"></textarea>
     <div style="display:flex; gap:8px; margin-top:8px;"><button type="button" class="btn" id="ag-modelo-padrao">Voltar ao modelo padrão</button></div>
   </details>
@@ -75,9 +75,10 @@
     <div class="gdc-campos">
       <label>Número da NF<input type="text" id="a-nf" maxlength="20" required autocomplete="off" inputmode="numeric"></label>
       <label>Data prevista da entrega<input type="date" id="a-prevista"></label>
-      <label class="gdc-largo">Cliente (recebedor)<input type="text" id="a-cliente" maxlength="200"></label>
+      <label class="gdc-largo">Destinatário da NF<input type="text" id="a-cliente" maxlength="200"></label>
       <label>Cidade<input type="text" id="a-cidade" maxlength="120"></label>
       <label>Telefone (WhatsApp)<input type="text" id="a-telefone" maxlength="25" placeholder="(81) 99999-8888" autocomplete="off"></label>
+      <label>Contato (quem atende)<input type="text" id="a-contato" maxlength="120" placeholder="nome antes do telefone na observação" autocomplete="off"></label>
     </div>
     <label>Observação da NF (cole aqui — o telefone é encontrado sozinho)<textarea id="a-obs" rows="4" maxlength="4000"></textarea></label>
     <div class="ag-fones" id="a-fones"></div>
