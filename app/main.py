@@ -24,8 +24,7 @@ from sqlalchemy.orm import Session, defer, undefer
 
 from . import chave_cte, config, relatorios_bipagem, tipos_cte
 from . import agendamento, bloqueio_login, escopo, gdc, historico, planilha_marca
-from .logistica import classificar as classificar_logistica
-from .prazo_comprovante import prazo_comprovante
+from . import painel_snapshot
 from .db import get_db
 from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, EmissaoCte, EmissaoRobo, Meta, ProtocoloFatura, TratativaComprovante, Usuario
 from .security import (
@@ -286,39 +285,9 @@ def comprovantes_page(request: Request):
     return templates.TemplateResponse("comprovantes.html", {"request": request, "active": "comprovantes"})
 
 
-def _row_to_dict(r: Carga) -> dict:
-    prazo_dias, distancia_km = prazo_comprovante(r.cidade_dest, r.uf_dest)
-    return {
-        "id_cte": r.id_cte,
-        "emissao": r.emissao,
-        "cte": r.cte,
-        "remetente": r.remetente,
-        "consignatario": r.consignatario,
-        "cidade_cons": r.cidade_cons,
-        "destinatario": r.destinatario,
-        "cidade_dest": r.cidade_dest,
-        "uf_dest": r.uf_dest,
-        "manifesto": r.manifesto,
-        "romaneio": r.romaneio,
-        "cidade_manifesto": r.cidade_manifesto,
-        "cidade_romaneio": r.cidade_romaneio,
-        "logistica": classificar_logistica(r),  # "rota" | "deposito" | None (não pendente)
-        "ocorrencia": r.ocorrencia,
-        "entregue": r.entregue,
-        "data_comprovante": r.data_comprovante,
-        "data_baixa": r.data_baixa,
-        "status": r.status,
-        "estado": r.estado,
-        "previsao": r.previsao,
-        "dias_atraso": r.dias_atraso,
-        "serie": r.serie,
-        "filial": r.filial,
-        "cnpj_filial": r.cnpj_filial,
-        "notas_fiscais": r.notas_fiscais,
-        "tipo_conhecimento": r.tipo_conhecimento,  # NORMAL, REENTREGA, CORTESIA, DEVOLUÇÃO...
-        "prazo_comprovante_dias": prazo_dias,
-        "distancia_km": distancia_km,
-    }
+# Conversão de um CT-e no formato do Painel: fica em painel_snapshot.py porque a
+# sincronização monta o mesmo formato (Painel pronto) sem passar pelo ORM.
+_row_to_dict = painel_snapshot.registro_para_dict
 
 
 # Escopo do analista (ver app/escopo.py): CT-e em que alguma das empresas
@@ -379,27 +348,39 @@ def api_cargas(
             return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
 
     def gerar() -> bytes:
-        # Sem as colunas que a tela não usa (CNPJ, endereço, redespacho...): menos bytes saindo do banco.
-        q = db.query(Carga).options(
-            defer(Carga.cte_redespacho), defer(Carga.cnpj_consignatario), defer(Carga.endereco_consignatario),
-            defer(Carga.cnpj_remetente), defer(Carga.atualizado_em),
-        )
         total_q = db.query(func.count(Carga.id))
-        if empresas is not None:
-            filtro = _filtro_empresas(empresas)
-            q, total_q = q.filter(filtro), total_q.filter(filtro)
-        if data_inicial:
-            q = q.filter(Carga.emissao >= data_inicial)
-        if data_final:
-            q = q.filter(Carga.emissao <= data_final)
-        if busca:
-            like = f"%{busca}%"
-            q = q.filter(or_(
-                func.lower(Carga.cte).like(like), func.lower(func.coalesce(Carga.notas_fiscais, "")).like(like),
-                func.lower(func.coalesce(Carga.consignatario, "")).like(like),
-                func.lower(func.coalesce(Carga.destinatario, "")).like(like),
-            )).limit(300)
-        records = [_row_to_dict(r) for r in q.all()]
+        filtro = _filtro_empresas(empresas) if empresas is not None else None
+        if filtro is not None:
+            total_q = total_q.filter(filtro)
+
+        # Painel pronto (app/painel_snapshot.py): o arquivo compactado do período,
+        # montado na sincronização -- ~1/8 do que sairia lendo as linhas de cargas.
+        pronto = None if busca else painel_snapshot.ler(db, validade, data_inicial, data_final, empresas)
+        if pronto is not None:
+            records, bytes_do_banco = pronto
+            rotulo = "cargas_pronto"
+        else:
+            # Sem as colunas que a tela não usa (CNPJ, endereço, redespacho...): menos bytes saindo do banco.
+            q = db.query(Carga).options(
+                defer(Carga.cte_redespacho), defer(Carga.cnpj_consignatario), defer(Carga.endereco_consignatario),
+                defer(Carga.cnpj_remetente), defer(Carga.atualizado_em),
+            )
+            if filtro is not None:
+                q = q.filter(filtro)
+            if data_inicial:
+                q = q.filter(Carga.emissao >= data_inicial)
+            if data_final:
+                q = q.filter(Carga.emissao <= data_final)
+            if busca:
+                like = f"%{busca}%"
+                q = q.filter(or_(
+                    func.lower(Carga.cte).like(like), func.lower(func.coalesce(Carga.notas_fiscais, "")).like(like),
+                    func.lower(func.coalesce(Carga.consignatario, "")).like(like),
+                    func.lower(func.coalesce(Carga.destinatario, "")).like(like),
+                )).limit(300)
+            records = [_row_to_dict(r) for r in q.all()]
+            bytes_do_banco = None  # estimado pelo tamanho da resposta, abaixo
+            rotulo = "cargas_busca" if busca else "cargas_banco"
         meta = {
             "gerado_em": validade[:10] if validade else hoje,
             # Instante exato da última sincronização (UTC) -- a tela mostra "há X h".
@@ -410,7 +391,10 @@ def api_cargas(
             "carregado_desde": data_inicial or None,  # None = todas as datas
             "fonte": "Webtrans (GW Sistemas) - relatório \"Pendências\", atualização automática",
         }
-        return json.dumps({"meta": meta, "records": records}, ensure_ascii=False).encode("utf-8")
+        corpo = json.dumps({"meta": meta, "records": records}, ensure_ascii=False).encode("utf-8")
+        # Quanto desta leitura saiu do banco (meta 'uso:AAAA-MM-DD:<rotulo>' = chamadas|bytes).
+        painel_snapshot.contar_uso(db, rotulo, bytes_do_banco if bytes_do_banco is not None else len(corpo))
+        return corpo
 
     if busca:
         corpo = gerar()

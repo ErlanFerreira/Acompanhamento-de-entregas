@@ -14,7 +14,7 @@ from io import BytesIO
 import openpyxl
 from sqlalchemy.orm import Session
 
-from . import config, historico
+from . import config, historico, painel_snapshot
 from .models import Carga, Meta
 from .scrape import ScrapeError, baixar_relatorio_pendencias
 
@@ -313,7 +313,17 @@ def run_sync(db: Session, window_days: int = None) -> int:
         registros = ler_relatorio(conteudo, referencia)
         count = gravar_registros(db, registros)
 
-        _set_meta(db, "last_sync_at", datetime.datetime.utcnow().isoformat())
+        validade = datetime.datetime.utcnow().isoformat()
+        try:
+            # Painel pronto (compactado) de cada período: o app lê isto em vez das
+            # linhas de cargas e gasta ~1/8 da transferência de saída do banco.
+            resumo = painel_snapshot.gravar(db, registros, hoje, window_days, validade)
+            print("::notice title=Painel pronto::" + " | ".join(resumo))
+        except Exception:
+            db.rollback()
+            logger.exception("Não foi possível gravar o Painel pronto -- o app usa as linhas de cargas.")
+
+        _set_meta(db, "last_sync_at", validade)
         _set_meta(db, "last_sync_count", str(count))
         _set_meta(db, "last_sync_status", "ok")
         db.commit()
