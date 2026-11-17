@@ -30,6 +30,11 @@
     return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   }
   function fmtN(n) { return n.toLocaleString("pt-BR"); }
+  // Tipo do conhecimento como o GW manda ("NORMAL", "REENTREGA"...) -> "Normal", "Reentrega".
+  function fmtTipo(t) {
+    const s = String(t || "").trim().toLowerCase();
+    return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+  }
   function fmtPct(n) { return (n * 100).toFixed(1).replace(".", ",") + "%"; }
   function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
 
@@ -80,7 +85,7 @@
 
     document.getElementById("header-sub").innerHTML =
       meta.total.toLocaleString("pt-BR") + " CT-e" +
-      '<span class="dot">·</span>Atualizado em ' + fmtDateLong(meta.gerado_em) +
+      '<span class="dot">·</span>' + htmlAtualizacao(meta, fmtDateLong(meta.gerado_em), true) +
       '<span class="dot">·</span>' + esc(meta.fonte);
 
     const ufCounts = {};
@@ -477,11 +482,12 @@
         const rows = ordem[parseInt(det.dataset.i, 10)][1];
         corpo.innerHTML =
           '<div class="comp-pend-scroll comp-vp-scroll"><table class="detail comp-pend-table"><thead><tr>' +
-          '<th>CT-e</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Status</th><th>Dias</th><th>Parado há</th><th>Última ocorrência</th><th>Manif.</th><th>Cidade do manifesto</th><th>Roman.</th>' +
+          '<th>CT-e</th><th>Tipo</th><th>Nota(s) fiscal(is)</th><th>Emissão</th><th>Destinatário</th><th>Cidade / UF</th><th>Entrega</th><th>Status</th><th>Dias</th><th>Parado há</th><th>Última ocorrência</th><th>Manif.</th><th>Cidade do manifesto</th><th>Roman.</th>' +
           '</tr></thead><tbody>' + rows.map(r => {
             const diasStr = r.dias_atraso == null ? "—" : (r.dias_atraso > 0 ? "+" + r.dias_atraso : r.dias_atraso);
             return '<tr>' +
               '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
+              '<td>' + esc(fmtTipo(r.tipo_conhecimento) || "—") + '</td>' +
               '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—").replace(/,\s*/g, ", ") + '</td>' +
               '<td>' + fmtDate(r.emissao) + '</td>' +
               '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario || "", 30)) + '</td>' +
@@ -531,7 +537,7 @@
         subtitulo: "Painel de Entregas" + (v.extra ? " · " + v.extra.rotulo + ": " + v.extra.texto : ""),
         info: [["Registros:", String(vlLinhas.length)]],
         colunas: [
-          { t: "Tomador", w: 32 }, { t: "CT-e", w: 12 }, { t: "Série", w: 7, tipo: "centro" }, { t: "Notas fiscais", w: 22 },
+          { t: "Tomador", w: 32 }, { t: "CT-e", w: 12 }, { t: "Série", w: 7, tipo: "centro" }, { t: "Tipo", w: 13 }, { t: "Notas fiscais", w: 22 },
           { t: "Emissão", w: 12, tipo: "data" }, { t: "Destinatário", w: 32 }, { t: "Cidade", w: 20 }, { t: "UF", w: 6, tipo: "centro" },
           { t: "Entrega", w: 12, tipo: "data" }, { t: "Status", w: 12, tipo: "centro", cores: { "No prazo": "2E7D32", "Pendente": "B36B00", "Vencido": "C62828", "Atrasado": "B36B00" } },
           { t: "Dias", w: 8, tipo: "inteiro" }, { t: "Previsão", w: 12, tipo: "data" }, { t: "Ocorrência", w: 36 },
@@ -540,7 +546,7 @@
           { t: "Parado há (dias)", w: 12, tipo: "inteiro" }
         ],
         linhas: vlLinhas.map(r => [
-          r.consignatario || "", r.cte, r.serie || "", r.notas_fiscais || "", r.emissao || "", r.destinatario || "",
+          r.consignatario || "", r.cte, r.serie || "", fmtTipo(r.tipo_conhecimento), r.notas_fiscais || "", r.emissao || "", r.destinatario || "",
           r.cidade_dest || "", r.uf_dest || "", r.data_baixa || "", STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso,
           r.previsao || "", r.ocorrencia || "", r.manifesto ? "Sim" : "Não", r.romaneio ? "Sim" : "Não",
           emRota(r) ? "Em rota" : emDeposito(r) ? "Em depósito" : "", emDeposito(r) && diasParado(r) != null ? diasParado(r) : ""
@@ -549,10 +555,10 @@
       baixarPlanilha(dadosXlsx, () => exportarCsvLista(v));
     });
     function exportarCsvLista(v) {
-      const lines = [["Tomador", "CT-e", "Serie", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio", "Situacao logistica", "Parado ha (dias)"].join(";")];
+      const lines = [["Tomador", "CT-e", "Serie", "Tipo", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio", "Situacao logistica", "Parado ha (dias)"].join(";")];
       vlLinhas.forEach(r => {
         lines.push([
-          csvSafe(r.consignatario || ""), r.cte, r.serie || "", csvSafe(r.notas_fiscais || ""), r.emissao || "", csvSafe(r.destinatario || ""),
+          csvSafe(r.consignatario || ""), r.cte, r.serie || "", fmtTipo(r.tipo_conhecimento), csvSafe(r.notas_fiscais || ""), r.emissao || "", csvSafe(r.destinatario || ""),
           csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "", STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso,
           r.previsao || "", csvSafe(r.ocorrencia || ""), r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao",
           emRota(r) ? "Em rota" : emDeposito(r) ? "Em deposito" : "", emDeposito(r) && diasParado(r) != null ? diasParado(r) : ""
@@ -831,12 +837,13 @@
 
       const tbody = document.getElementById("table-body");
       if (!pageRows.length) {
-        tbody.innerHTML = '<tr><td colspan="10"><div class="empty-state">Nenhum registro para os filtros atuais.</div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state">Nenhum registro para os filtros atuais.</div></td></tr>';
       } else {
         tbody.innerHTML = pageRows.map(r => {
           const diasStr = r.dias_atraso == null ? "—" : (r.dias_atraso > 0 ? "+" + r.dias_atraso : r.dias_atraso);
           return '<tr>' +
             '<td>' + esc(r.cte) + '</td>' +
+            '<td>' + esc(fmtTipo(r.tipo_conhecimento) || "—") + '</td>' +
             '<td>' + fmtDateShort(r.emissao) + '</td>' +
             '<td title="' + esc(r.consignatario) + '">' + esc(truncate(r.consignatario || "", 26)) + '</td>' +
             '<td title="' + esc(r.destinatario) + '">' + esc(truncate(r.destinatario, 26)) + '</td>' +
@@ -880,23 +887,23 @@
         subtitulo: "Painel de Entregas · tabela filtrada",
         info: [["Registros:", String(rows.length)]],
         colunas: [
-          { t: "CT-e", w: 12 }, { t: "Emissão", w: 12, tipo: "data" }, { t: "Tomador", w: 32 }, { t: "Destinatário", w: 32 },
+          { t: "CT-e", w: 12 }, { t: "Tipo", w: 13 }, { t: "Emissão", w: 12, tipo: "data" }, { t: "Tomador", w: 32 }, { t: "Destinatário", w: 32 },
           { t: "Cidade", w: 20 }, { t: "UF", w: 6, tipo: "centro" }, { t: "Status", w: 12, tipo: "centro", cores: { "No prazo": "2E7D32", "Pendente": "B36B00", "Vencido": "C62828", "Atrasado": "B36B00" } },
           { t: "Dias", w: 8, tipo: "inteiro" }, { t: "Ocorrência", w: 36 }, { t: "Manifesto", w: 11, tipo: "centro" }, { t: "Romaneio", w: 11, tipo: "centro" }
         ],
         linhas: rows.map(r => [
-          r.cte, r.emissao || "", r.consignatario || "", r.destinatario || "", r.cidade_dest || "", r.uf_dest || "",
+          r.cte, fmtTipo(r.tipo_conhecimento), r.emissao || "", r.consignatario || "", r.destinatario || "", r.cidade_dest || "", r.uf_dest || "",
           STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso, r.ocorrencia || "",
           r.manifesto ? "Sim" : "Não", r.romaneio ? "Sim" : "Não"
         ])
       }, () => exportarCsvTabela(rows));
     }
     function exportarCsvTabela(rows) {
-      const headers = ["CT-e", "Emissao", "Tomador", "Destinatario", "Cidade", "UF", "Status", "Dias", "Ocorrencia", "Manifesto", "Romaneio"];
+      const headers = ["CT-e", "Tipo", "Emissao", "Tomador", "Destinatario", "Cidade", "UF", "Status", "Dias", "Ocorrencia", "Manifesto", "Romaneio"];
       const lines = [headers.join(";")];
       rows.forEach(r => {
         lines.push([
-          r.cte, r.emissao, csvSafe(r.consignatario || ""), csvSafe(r.destinatario), csvSafe(r.cidade_dest), r.uf_dest,
+          r.cte, fmtTipo(r.tipo_conhecimento), r.emissao, csvSafe(r.consignatario || ""), csvSafe(r.destinatario), csvSafe(r.cidade_dest), r.uf_dest,
           STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso, csvSafe(r.ocorrencia || ""),
           r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao"
         ].join(";"));

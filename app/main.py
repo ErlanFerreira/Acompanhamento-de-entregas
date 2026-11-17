@@ -315,6 +315,7 @@ def _row_to_dict(r: Carga) -> dict:
         "filial": r.filial,
         "cnpj_filial": r.cnpj_filial,
         "notas_fiscais": r.notas_fiscais,
+        "tipo_conhecimento": r.tipo_conhecimento,  # NORMAL, REENTREGA, CORTESIA, DEVOLUÇÃO...
         "prazo_comprovante_dias": prazo_dias,
         "distancia_km": distancia_km,
     }
@@ -381,7 +382,7 @@ def api_cargas(
         # Sem as colunas que a tela não usa (CNPJ, endereço, redespacho...): menos bytes saindo do banco.
         q = db.query(Carga).options(
             defer(Carga.cte_redespacho), defer(Carga.cnpj_consignatario), defer(Carga.endereco_consignatario),
-            defer(Carga.cnpj_remetente), defer(Carga.tipo_conhecimento), defer(Carga.atualizado_em),
+            defer(Carga.cnpj_remetente), defer(Carga.atualizado_em),
         )
         total_q = db.query(func.count(Carga.id))
         if empresas is not None:
@@ -401,6 +402,8 @@ def api_cargas(
         records = [_row_to_dict(r) for r in q.all()]
         meta = {
             "gerado_em": validade[:10] if validade else hoje,
+            # Instante exato da última sincronização (UTC) -- a tela mostra "há X h".
+            "sincronizado_em": (validade[:23] + "Z") if validade else None,
             "referencia": hoje,
             "total": total_q.scalar() or 0,  # todos os CT-e do escopo, não só os carregados
             "carregados": len(records),

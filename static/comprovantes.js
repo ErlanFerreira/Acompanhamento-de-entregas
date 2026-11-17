@@ -235,7 +235,7 @@
 
     document.getElementById("header-sub").innerHTML =
       fmtN(meta.total) + " CT-e sincronizados" +
-      '<span class="dot">·</span>Atualizado em ' + fmtDateLong(meta.gerado_em) +
+      '<span class="dot">·</span>' + htmlAtualizacao(meta, fmtDateLong(meta.gerado_em), false) +
       '<span class="dot">·</span>Comprovante = "Data Comprovante" preenchida no GW';
 
     function preencherSelect(el, chaveFn) {

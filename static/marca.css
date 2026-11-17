@@ -98,3 +98,8 @@ body.login-body { background: var(--marca-azul); align-items: flex-start; paddin
 .usr-telas-atalhos { float: right; display: inline-flex; gap: 6px; }
 .usr-telas-atalhos .btn { padding: 2px 10px; font-size: 12px; }
 @media (max-width: 640px) { .usr-telas { grid-template-columns: 1fr; } }
+
+/* Idade dos dados no cabeçalho ("Atualizado hoje às 11:10 (há 3 h)") -- static/atualizacao.js */
+.dados-idade.aviso { color: var(--status-warning); font-weight: 600; }
+.dados-idade.velho { color: var(--status-critical); font-weight: 700; }
+.dados-idade .dica { font-weight: 500; }
