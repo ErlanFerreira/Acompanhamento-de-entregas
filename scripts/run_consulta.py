@@ -72,12 +72,16 @@ def _filtrar_por_parceiro(matches: list[dict], nomes_esperados: list[str]) -> li
         return matches  # planilha não tem colunas pra validar -- mantém como antes
     nomes = _nomes_distintos(nomes_esperados)
     exigido = _exigido(nomes)
-    sem_nome = [m for m in matches if not (m.get("consignatario") or m.get("remetente") or m.get("destinatario"))]
-    pontuados = [(m, _pontos(m, nomes)) for m in matches if m not in sem_nome]
+    # CT-e sem nome lido NÃO é aceito: sem nome não há como confirmar que é do
+    # cliente da linha, e o número da NF sozinho não é único (já voltou CT-e de
+    # outro cliente por isso). Fica de fora e a observação explica.
+    pontuados = [(m, _pontos(m, nomes)) for m in matches if _tem_nome(m)]
     melhor = max([p for _, p in pontuados] or [0])
-    validos = [m for m, p in pontuados if p >= max(exigido, 1) and p == melhor]
-    # CT-e sem nome extraível (ex: tipo != "Normal") não dá pra invalidar: mantém.
-    return validos + sem_nome
+    return [m for m, p in pontuados if p >= max(exigido, 1) and p == melhor]
+
+
+def _tem_nome(m: dict) -> bool:
+    return bool(m.get("consignatario") or m.get("remetente") or m.get("destinatario"))
 
 
 def main(job_id: int):
@@ -128,8 +132,14 @@ def main(job_id: int):
                 item.encontrado = False
                 # Diz POR QUE deu "Não" (vai pra coluna Observação da planilha):
                 # o portal não achou a NF, ou achou mas é de outro cliente.
-                if todos:
-                    t = todos[0]
+                if todos and not any(_tem_nome(m) for m in todos):
+                    item.observacao = (
+                        f"NF localizada em {len(todos)} CT-e (ex.: {todos[0].get('cte')}), mas não deu pra ler "
+                        f"tomador/remetente/destinatário no GW, então não foi possível confirmar que é do cliente. "
+                        f"Cliente(s) na planilha: {', '.join(nomes)}"
+                    )[:900]
+                elif todos:
+                    t = next(m for m in todos if _tem_nome(m))
                     distintos = _nomes_distintos(nomes)
                     item.observacao = (
                         f"NF localizada em {len(todos)} CT-e, mas só {_pontos(t, distintos)} de {len(distintos)} nome(s) "

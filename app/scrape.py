@@ -14,6 +14,7 @@ import datetime
 import logging
 import re
 import unicodedata
+from html import unescape as _html_unescape
 
 import requests
 from playwright.sync_api import Page, sync_playwright
@@ -406,17 +407,17 @@ def _parse_resultado(texto: str) -> list[dict]:
 
 
 def _extrair_nomes_por_cte(html: str) -> dict[str, dict]:
-    """Extrai remetente/destinatário por CT-e a partir do HTML bruto da
-    tabela de resultados -- reaproveita os mesmos padrões usados pelo bot
-    de e-mail (ver `_LINHA_RE`/`_POPIMG_RE` mais abaixo neste arquivo), já
-    que é a mesma tela e a mesma estrutura de tabela."""
-    popimgs = {pid: pnum for pid, pnum, _data, _filial in _POPIMG_RE.findall(html)}
-    nomes: dict[str, dict] = {}
-    for idconhecimento, _filial_col, _consig, remetente, destinatario in _LINHA_RE.findall(html):
-        cte = popimgs.get(idconhecimento)
-        if cte:
-            nomes[cte] = {"consignatario": _consig.strip(), "remetente": remetente.strip(), "destinatario": destinatario.strip()}
-    return nomes
+    """Consignatário (tomador), remetente e destinatário por CT-e, a partir do
+    HTML bruto da tabela de resultados (`ler_linhas_ctes`), de qualquer tipo de
+    CT-e. A chave é o número do CT-e ("008541/M")."""
+    return {
+        linha["cte"]: {
+            "consignatario": linha["consignatario"],
+            "remetente": linha["remetente"],
+            "destinatario": linha["destinatario"],
+        }
+        for linha in ler_linhas_ctes(html)
+    }
 
 
 # Texto da tela de resultado das NFs em que não apareceu CT-e nenhum, pra
@@ -452,8 +453,8 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
 
     Retorna um dict {numero_nf: [resultado, ...]} -- lista vazia se não foi
     encontrado, mais de um item se aparece em mais de um CT-e. Cada
-    resultado também inclui "remetente"/"destinatario" (podem vir `None`
-    se não for possível extrair -- ex: CT-e que não seja do tipo "Normal"),
+    resultado também inclui "consignatario"/"remetente"/"destinatario" (de
+    qualquer tipo de CT-e; só vêm `None` se a tela mudar e a leitura falhar),
     pra quem chamar poder validar se o achado realmente pertence ao
     cliente esperado antes de aceitar.
 
@@ -546,18 +547,50 @@ def consultar_notas_fiscais(numeros_nf: list[str], progresso=None) -> dict[str, 
 # (app/email_bot.py, que também precisa baixar a imagem do comprovante --
 # ver `consultar_e_confirmar_para_email` mais abaixo).
 
-_LINHA_RE = re.compile(
-    # A tabela alterna "CelulaZebra1"/"CelulaZebra2" por linha (efeito
-    # zebra) -- aceita as duas, senão metade das linhas (as pares) fica de
-    # fora silenciosamente. A coluna "Filial" também pode ter mais de uma
-    # palavra (ex: "Filial GRU", não só "MATRIZ") -- usava `\w+`, que não
-    # casa espaço, e aí o ".*?" vazava pra linha seguinte da tabela e
-    # misturava o remetente/destinatário de um CT-e com o de outro.
-    r"CelulaZebra[12]\"[^>]*>\s*<td>\s*<img[^>]*plus_(\d+)\".*?"
-    r"<td>\s*Normal</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>\s*<td>\s*([^<]+)</td>",
-    re.DOTALL,
-)
+# Linha de CT-e da tabela de resultado da Consulta Entrega. Células, em ordem:
+# [ícone "plus_<id>"] [número do CT-e] [Tipo] [Filial] [Consignatário/tomador]
+# [Remetente] [Destinatário] [Destino] [Frete] [CON/RED].
+#
+# A leitura é feita linha a linha (<tr> ... </tr>), sem nunca passar de uma
+# linha pra outra. A versão anterior usava uma única regex que só aceitava o
+# tipo "Normal": numa NF com um CT-e "Diárias" (ou Cortesia, Reentrega...) ela
+# pulava essa linha e emendava o começo dela com o fim da linha seguinte -- o
+# CT-e Diárias ficava com os nomes do CT-e Normal (e passava na conferência de
+# cliente) enquanto o CT-e certo ficava sem nome.
+_TR_CTE_RE = re.compile(r"<tr class=\"CelulaZebra[12]\"[^>]*>(.*?)</tr>", re.DOTALL)
+_TD_RE = re.compile(r"<td[^>]*>(.*?)</td>", re.DOTALL)
+_PLUS_RE = re.compile(r"id=\"plus_(\d+)\"")
+_TAG_RE = re.compile(r"<[^>]+>")
 _POPIMG_RE = re.compile(r"popImg\('(\d+)','([^']+)','([^']+)','([^']+)'\)")
+
+
+def _texto_celula(celula: str) -> str:
+    return " ".join(_html_unescape(_TAG_RE.sub(" ", celula)).split())
+
+
+def ler_linhas_ctes(html: str) -> list[dict]:
+    """Um item por CT-e da tabela de resultado, de QUALQUER tipo: idconhecimento,
+    cte ("008541/M"), tipo ("Normal", "Diárias"...), filial, consignatario
+    (tomador), remetente e destinatario."""
+    linhas = []
+    for m in _TR_CTE_RE.finditer(html):
+        corpo = m.group(1)
+        achou_id = _PLUS_RE.search(corpo)
+        if not achou_id:
+            continue
+        celulas = [_texto_celula(c) for c in _TD_RE.findall(corpo)]
+        if len(celulas) < 7 or not celulas[1]:
+            continue
+        linhas.append({
+            "idconhecimento": achou_id.group(1),
+            "cte": celulas[1],
+            "tipo": celulas[2],
+            "filial": celulas[3],
+            "consignatario": celulas[4],
+            "remetente": celulas[5],
+            "destinatario": celulas[6],
+        })
+    return linhas
 
 _SUFIXOS_EMPRESA = {
     "LTDA", "SA", "S/A", "ME", "EPP", "EIRELI", "MEI", "IND", "INDUSTRIA",
