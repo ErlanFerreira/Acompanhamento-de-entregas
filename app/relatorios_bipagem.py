@@ -18,8 +18,10 @@ from collections import Counter
 from pathlib import Path
 
 import openpyxl
-from openpyxl.drawing.image import Image
+from openpyxl.cell.cell import MergedCell
 from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.drawing.image import Image
+from openpyxl.worksheet.pagebreak import Break
 from openpyxl.formatting.formatting import ConditionalFormattingList
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
@@ -403,12 +405,22 @@ def tomadores_disponiveis(db: Session, empresas: set[str] | None = None) -> list
 
 # ------------------------------------------------ protocolo de faturas ----
 
-# O modelo tem uma página por aba, com 41 linhas (10 a 50; a 51 é só um
-# espaçador) e dois pares "DACTE / NF": colunas A (mesclada com B) / C e
-# D / E. Preenche o primeiro par de cima a baixo, depois o segundo.
-# Cada posição: (linha, coluna do DACTE, coluna da NF).
+# O modelo é uma página (linhas 1 a 54, colunas A a E): cabeçalho do
+# emitente, recebedor, 41 linhas de CT-e (10 a 50; a 51 é só um espaçador)
+# com dois pares "DACTE / NF" -- colunas A (mesclada com B) / C e D / E -- e a
+# declaração de recebimento com assinatura. Preenche o primeiro par de cima a
+# baixo, depois o segundo. Cada posição: (linha, coluna do DACTE, coluna da NF).
 _LINHAS_PROTOCOLO = range(10, 51)
 _SLOTS_PROTOCOLO = [(r, 1, 3) for r in _LINHAS_PROTOCOLO] + [(r, 4, 5) for r in _LINHAS_PROTOCOLO]
+# Cliente com mais CT-e do que cabe numa página continua na MESMA aba, numa
+# página nova logo abaixo (cópia da página 1), com quebra de página entre
+# elas.
+_LINHAS_PAGINA = 54
+_COLUNAS_PAGINA = 5  # A..E
+# Escala fixa de impressão: o modelo vinha em "ajustar à largura" (~84% numa
+# A4), mas com essa opção o Excel ignora as quebras de página manuais e a
+# página 2 começaria no meio da 1. Em 82% cada página cabe inteira na A4.
+_ESCALA_IMPRESSAO = 82
 # Como o emitente aparece no modelo (que foi feito pra matriz).
 _EMITENTE_MODELO = {
     "razao_social": "G. FREIRE BEZERRA DE MORAIS",
@@ -461,6 +473,53 @@ def _copiar_imagens(origem, destino):
         destino.add_image(nova)
 
 
+def _copiar_pagina(ws, deslocamento: int) -> None:
+    """Copia a página modelo (linhas 1.._LINHAS_PAGINA, ainda vazia) pra
+    `deslocamento` linhas abaixo: valores, formatação, alturas, mesclagens e
+    o logo."""
+    for r in range(1, _LINHAS_PAGINA + 1):
+        altura = ws.row_dimensions[r].height
+        if altura is not None:
+            ws.row_dimensions[r + deslocamento].height = altura
+        for c in range(1, _COLUNAS_PAGINA + 1):
+            origem = ws.cell(row=r, column=c)
+            destino = ws.cell(row=r + deslocamento, column=c)
+            if not isinstance(origem, MergedCell):
+                destino.value = origem.value
+            if origem.has_style:
+                destino._style = copy.copy(origem._style)
+    for faixa in list(ws.merged_cells.ranges):
+        if faixa.max_row <= _LINHAS_PAGINA:
+            ws.merge_cells(
+                start_row=faixa.min_row + deslocamento, start_column=faixa.min_col,
+                end_row=faixa.max_row + deslocamento, end_column=faixa.max_col,
+            )
+    for img in list(ws._images):
+        if img.anchor._from.row >= _LINHAS_PAGINA:
+            continue  # logo de uma página já copiada
+        dados = img._data()
+        img.ref = io.BytesIO(dados)  # `_data()` fecha o buffer (ver _copiar_imagens)
+        nova = Image(io.BytesIO(dados))
+        nova.anchor = copy.deepcopy(img.anchor)
+        nova.anchor._from.row += deslocamento
+        if getattr(nova.anchor, "to", None) is not None:
+            nova.anchor.to.row += deslocamento
+        nova.width, nova.height = img.width, img.height
+        ws.add_image(nova)
+
+
+def _preparar_paginas(ws, paginas: int) -> None:
+    """Acrescenta as páginas 2.. na aba e ajusta a impressão: área A:E, uma
+    quebra de página por página, escala fixa."""
+    for k in range(1, paginas):
+        _copiar_pagina(ws, k * _LINHAS_PAGINA)
+        ws.row_breaks.append(Break(id=k * _LINHAS_PAGINA))
+    ws.print_area = f"A1:E{paginas * _LINHAS_PAGINA}"
+    if ws.sheet_properties.pageSetUpPr is not None:
+        ws.sheet_properties.pageSetUpPr.fitToPage = False
+    ws.page_setup.scale = _ESCALA_IMPRESSAO
+
+
 def _titulo_aba(nome: str, usados: set[str]) -> str:
     base = "".join(c for c in nome if c not in "[]:*?/\\")[:28].strip() or "Protocolo"
     titulo, n = base, 2
@@ -498,13 +557,12 @@ def gerar_protocolo_faturas(db: Session, bips: list[Bipagem]) -> bytes:
             grupos.setdefault((item["cnpj_filial"], cliente), []).append(item)
 
     capacidade = len(_SLOTS_PROTOCOLO)
-    # (recebedor, itens da aba) -- grupo com mais CT-e do que cabe numa aba
-    # continua em outra aba, com o mesmo recebedor.
+    # Uma aba por grupo: (recebedor, páginas -- cada uma com até `capacidade`
+    # CT-e). Grupo com mais CT-e continua em páginas novas na mesma aba.
     folhas = [
-        (_recebedor(itens), itens[i:i + capacidade])
+        (_recebedor(itens), [itens[i:i + capacidade] for i in range(0, len(itens), capacidade)])
         for itens in grupos.values()
-        for i in range(0, len(itens), capacidade)
-    ] or [({}, [])]
+    ] or [({}, [[]])]
 
     wb = openpyxl.load_workbook(MODELOS / "protocolo_envio.xlsx", rich_text=True)
     base = wb.active
@@ -519,27 +577,30 @@ def gerar_protocolo_faturas(db: Session, bips: list[Bipagem]) -> bytes:
         abas.append(nova)
 
     titulos: set[str] = set()
-    for ws, (primeiro, itens) in zip(abas, folhas):
+    for ws, (primeiro, paginas) in zip(abas, folhas):
         filial = dados_filial(primeiro.get("cnpj_filial"))
         razao = filial["razao_social"] or filial["apelido"]
 
         ws.title = _titulo_aba(primeiro.get("tomador_nome") or "Protocolo", titulos)
-        # Recebedor = tomador do serviço.
-        ws["B5"] = primeiro.get("tomador_nome")
-        ws["B6"] = primeiro.get("tomador_endereco")
-        ws["B7"] = fmt_cnpj(primeiro.get("tomador_cnpj")) or None
-        ws["E7"] = primeiro.get("tomador_cidade")
-        # Emitente (faixa azul do topo): o modelo já vem com os dados da
-        # matriz -- troca só o texto dentro da formatação (negrito
-        # "CNPJ:"/"Endereço:"), sem perder o rich text da célula.
-        _substituir(ws["C1"], _EMITENTE_MODELO["razao_social"], razao)
-        _substituir(ws["E1"], _EMITENTE_MODELO["cnpj"], fmt_cnpj(filial["cnpj"]))
-        _substituir(ws["C2"], _EMITENTE_MODELO["endereco"], filial["endereco"])
+        _preparar_paginas(ws, len(paginas))  # copia a página ainda vazia
+        for k, itens in enumerate(paginas):
+            d = k * _LINHAS_PAGINA  # primeira linha da página k = 1 + d
+            # Recebedor = tomador do serviço.
+            ws.cell(row=5 + d, column=2, value=primeiro.get("tomador_nome"))
+            ws.cell(row=6 + d, column=2, value=primeiro.get("tomador_endereco"))
+            ws.cell(row=7 + d, column=2, value=fmt_cnpj(primeiro.get("tomador_cnpj")) or None)
+            ws.cell(row=7 + d, column=5, value=primeiro.get("tomador_cidade"))
+            # Emitente (faixa azul do topo): o modelo já vem com os dados da
+            # matriz -- troca só o texto dentro da formatação (negrito
+            # "CNPJ:"/"Endereço:"), sem perder o rich text da célula.
+            _substituir(ws.cell(row=1 + d, column=3), _EMITENTE_MODELO["razao_social"], razao)
+            _substituir(ws.cell(row=1 + d, column=5), _EMITENTE_MODELO["cnpj"], fmt_cnpj(filial["cnpj"]))
+            _substituir(ws.cell(row=2 + d, column=3), _EMITENTE_MODELO["endereco"], filial["endereco"])
 
-        for (linha, col_dacte, col_nf), item in zip(_SLOTS_PROTOCOLO, itens):
-            for coluna, valor in ((col_dacte, item["dacte"]), (col_nf, item["nf"])):
-                celula = ws.cell(row=linha, column=coluna, value=valor)
-                celula.alignment = celula.alignment.copy(horizontal="center")
+            for (linha, col_dacte, col_nf), item in zip(_SLOTS_PROTOCOLO, itens):
+                for coluna, valor in ((col_dacte, item["dacte"]), (col_nf, item["nf"])):
+                    celula = ws.cell(row=linha + d, column=coluna, value=valor)
+                    celula.alignment = celula.alignment.copy(horizontal="center")
 
     return _salvar(wb)
 
