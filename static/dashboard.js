@@ -30,10 +30,15 @@
     return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
   }
   function fmtN(n) { return n.toLocaleString("pt-BR"); }
-  // Tipo do conhecimento como o GW manda ("NORMAL", "REENTREGA"...) -> "Normal", "Reentrega".
+  // O GW manda o tipo do conhecimento como uma letra (a mesma do campo "Tipo" da
+  // emissão -- ver app/tipos_cte.py). "t" confirmado na Consulta Entrega.
+  const TIPOS_CTE = {
+    n: "Normal", r: "Reentrega", d: "Devolução", i: "Diárias", g: "Descarga", p: "Coleta/Pallets",
+    c: "Complementar", s: "Substituição", b: "Cortesia", t: "Substituído"
+  };
   function fmtTipo(t) {
-    const s = String(t || "").trim().toLowerCase();
-    return s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+    const k = String(t || "").trim().toLowerCase();
+    return k ? (TIPOS_CTE[k] || k.toUpperCase()) : "";
   }
   function fmtPct(n) { return (n * 100).toFixed(1).replace(".", ",") + "%"; }
   function esc(s) { const d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
@@ -74,14 +79,20 @@
 
   async function loadData() {
     const desde = desdeDoPeriodo(PERIODO_INICIAL, URL_PARAMS.get("de"));
+    // Bips da tela de Bipagem (selo verde ao lado do CT-e): se falhar, o Painel abre sem os selos.
+    const pedidoBips = fetch("/api/bipados" + (desde ? "?desde=" + desde : ""), { credentials: "same-origin" })
+      .then(r => r.ok ? r.json() : { bips: [] }).catch(() => ({ bips: [] }));
     const resp = await fetch("/api/cargas" + (desde ? "?data_inicial=" + desde : ""), { credentials: "same-origin" });
     if (resp.status === 401) { window.location.href = "/login"; return null; }
-    return resp.json();
+    const dados = await resp.json();
+    dados.bips = (await pedidoBips).bips || [];
+    return dados;
   }
 
   function boot(DATA) {
     const records = DATA.records;
     const meta = DATA.meta;
+    const bipados = criarBipados(DATA.bips);  // selo "comprovante bipado" (static/bipados.js)
 
     document.getElementById("header-sub").innerHTML =
       meta.total.toLocaleString("pt-BR") + " CT-e" +
@@ -486,7 +497,7 @@
           '</tr></thead><tbody>' + rows.map(r => {
             const diasStr = r.dias_atraso == null ? "—" : (r.dias_atraso > 0 ? "+" + r.dias_atraso : r.dias_atraso);
             return '<tr>' +
-              '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + '</td>' +
+              '<td>' + esc(r.cte) + (r.serie ? '<span class="bip-muted">/' + esc(r.serie) + '</span>' : "") + bipados.selo(r) + '</td>' +
               '<td>' + esc(fmtTipo(r.tipo_conhecimento) || "—") + '</td>' +
               '<td class="comp-pend-nf">' + esc(r.notas_fiscais || "—").replace(/,\s*/g, ", ") + '</td>' +
               '<td>' + fmtDate(r.emissao) + '</td>' +
@@ -543,25 +554,28 @@
           { t: "Dias", w: 8, tipo: "inteiro" }, { t: "Previsão", w: 12, tipo: "data" }, { t: "Ocorrência", w: 36 },
           { t: "Manifesto", w: 11, tipo: "centro" }, { t: "Romaneio", w: 11, tipo: "centro" },
           { t: "Situação logística", w: 17, tipo: "centro", cores: { "Em rota": "2E7D32", "Em depósito": "B36B00" } },
-          { t: "Parado há (dias)", w: 12, tipo: "inteiro" }
+          { t: "Parado há (dias)", w: 12, tipo: "inteiro" },
+          { t: "Comprovante bipado em", w: 20, tipo: "data" }
         ],
         linhas: vlLinhas.map(r => [
           r.consignatario || "", r.cte, r.serie || "", fmtTipo(r.tipo_conhecimento), r.notas_fiscais || "", r.emissao || "", r.destinatario || "",
           r.cidade_dest || "", r.uf_dest || "", r.data_baixa || "", STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso,
           r.previsao || "", r.ocorrencia || "", r.manifesto ? "Sim" : "Não", r.romaneio ? "Sim" : "Não",
-          emRota(r) ? "Em rota" : emDeposito(r) ? "Em depósito" : "", emDeposito(r) && diasParado(r) != null ? diasParado(r) : ""
+          emRota(r) ? "Em rota" : emDeposito(r) ? "Em depósito" : "", emDeposito(r) && diasParado(r) != null ? diasParado(r) : "",
+          bipados.dataIso(r)
         ])
       };
       baixarPlanilha(dadosXlsx, () => exportarCsvLista(v));
     });
     function exportarCsvLista(v) {
-      const lines = [["Tomador", "CT-e", "Serie", "Tipo", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio", "Situacao logistica", "Parado ha (dias)"].join(";")];
+      const lines = [["Tomador", "CT-e", "Serie", "Tipo", "Notas fiscais", "Emissao", "Destinatario", "Cidade", "UF", "Entrega", "Status", "Dias", "Previsao", "Ocorrencia", "Manifesto", "Romaneio", "Situacao logistica", "Parado ha (dias)", "Comprovante bipado em"].join(";")];
       vlLinhas.forEach(r => {
         lines.push([
           csvSafe(r.consignatario || ""), r.cte, r.serie || "", fmtTipo(r.tipo_conhecimento), csvSafe(r.notas_fiscais || ""), r.emissao || "", csvSafe(r.destinatario || ""),
           csvSafe(r.cidade_dest || ""), r.uf_dest || "", r.data_baixa || "", STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso,
           r.previsao || "", csvSafe(r.ocorrencia || ""), r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao",
-          emRota(r) ? "Em rota" : emDeposito(r) ? "Em deposito" : "", emDeposito(r) && diasParado(r) != null ? diasParado(r) : ""
+          emRota(r) ? "Em rota" : emDeposito(r) ? "Em deposito" : "", emDeposito(r) && diasParado(r) != null ? diasParado(r) : "",
+          bipados.dataIso(r)
         ].join(";"));
       });
       const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
@@ -842,7 +856,7 @@
         tbody.innerHTML = pageRows.map(r => {
           const diasStr = r.dias_atraso == null ? "—" : (r.dias_atraso > 0 ? "+" + r.dias_atraso : r.dias_atraso);
           return '<tr>' +
-            '<td>' + esc(r.cte) + '</td>' +
+            '<td>' + esc(r.cte) + bipados.selo(r) + '</td>' +
             '<td>' + esc(fmtTipo(r.tipo_conhecimento) || "—") + '</td>' +
             '<td>' + fmtDateShort(r.emissao) + '</td>' +
             '<td title="' + esc(r.consignatario) + '">' + esc(truncate(r.consignatario || "", 26)) + '</td>' +
@@ -889,23 +903,24 @@
         colunas: [
           { t: "CT-e", w: 12 }, { t: "Tipo", w: 13 }, { t: "Emissão", w: 12, tipo: "data" }, { t: "Tomador", w: 32 }, { t: "Destinatário", w: 32 },
           { t: "Cidade", w: 20 }, { t: "UF", w: 6, tipo: "centro" }, { t: "Status", w: 12, tipo: "centro", cores: { "No prazo": "2E7D32", "Pendente": "B36B00", "Vencido": "C62828", "Atrasado": "B36B00" } },
-          { t: "Dias", w: 8, tipo: "inteiro" }, { t: "Ocorrência", w: 36 }, { t: "Manifesto", w: 11, tipo: "centro" }, { t: "Romaneio", w: 11, tipo: "centro" }
+          { t: "Dias", w: 8, tipo: "inteiro" }, { t: "Ocorrência", w: 36 }, { t: "Manifesto", w: 11, tipo: "centro" }, { t: "Romaneio", w: 11, tipo: "centro" },
+          { t: "Comprovante bipado em", w: 20, tipo: "data" }
         ],
         linhas: rows.map(r => [
           r.cte, fmtTipo(r.tipo_conhecimento), r.emissao || "", r.consignatario || "", r.destinatario || "", r.cidade_dest || "", r.uf_dest || "",
           STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso, r.ocorrencia || "",
-          r.manifesto ? "Sim" : "Não", r.romaneio ? "Sim" : "Não"
+          r.manifesto ? "Sim" : "Não", r.romaneio ? "Sim" : "Não", bipados.dataIso(r)
         ])
       }, () => exportarCsvTabela(rows));
     }
     function exportarCsvTabela(rows) {
-      const headers = ["CT-e", "Tipo", "Emissao", "Tomador", "Destinatario", "Cidade", "UF", "Status", "Dias", "Ocorrencia", "Manifesto", "Romaneio"];
+      const headers = ["CT-e", "Tipo", "Emissao", "Tomador", "Destinatario", "Cidade", "UF", "Status", "Dias", "Ocorrencia", "Manifesto", "Romaneio", "Comprovante bipado em"];
       const lines = [headers.join(";")];
       rows.forEach(r => {
         lines.push([
           r.cte, fmtTipo(r.tipo_conhecimento), r.emissao, csvSafe(r.consignatario || ""), csvSafe(r.destinatario), csvSafe(r.cidade_dest), r.uf_dest,
           STATUS_SHORT[r.estado], r.dias_atraso == null ? "" : r.dias_atraso, csvSafe(r.ocorrencia || ""),
-          r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao"
+          r.manifesto ? "Sim" : "Nao", r.romaneio ? "Sim" : "Nao", bipados.dataIso(r)
         ].join(";"));
       });
       const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });

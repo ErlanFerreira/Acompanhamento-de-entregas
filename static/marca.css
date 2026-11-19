@@ -103,3 +103,7 @@ body.login-body { background: var(--marca-azul); align-items: flex-start; paddin
 .dados-idade.aviso { color: var(--status-warning); font-weight: 600; }
 .dados-idade.velho { color: var(--status-critical); font-weight: 700; }
 .dados-idade .dica { font-weight: 500; }
+
+/* Selo verde "comprovante bipado" ao lado do CT-e no Painel -- static/bipados.js */
+.cte-bip { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 5px; border-radius: 50%; background: var(--status-good); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; vertical-align: middle; cursor: help; }
+td:has(> .cte-bip) { white-space: nowrap; }

@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session, defer, undefer
 
 from . import chave_cte, config, relatorios_bipagem, tipos_cte
 from . import agendamento, bloqueio_login, escopo, gdc, historico, planilha_marca
-from . import painel_snapshot
+from . import painel_bips, painel_snapshot
 from .db import get_db
 from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, EmissaoCte, EmissaoRobo, Meta, ProtocoloFatura, TratativaComprovante, Usuario
 from .security import (
@@ -87,6 +87,7 @@ app.include_router(historico.router)
 app.include_router(gdc.router)
 app.include_router(agendamento.router)
 app.include_router(planilha_marca.router)
+app.include_router(painel_bips.router)
 
 
 @app.exception_handler(SQLAlchemyError)
