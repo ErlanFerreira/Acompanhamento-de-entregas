@@ -21,6 +21,8 @@
 
   let loteAtual = C.ler(CHAVE_LOTE);
   let pedidos = [];
+  // `atualizado_em` mais novo já recebido: o acompanhamento (5 em 5 s) só pede o que mudou depois.
+  let ultimaMudanca = "";
   let timer = null;
   // m³ digitados nas linhas "Falta a cubagem" -- a tabela é redesenhada a
   // cada 5 s e não pode apagar o que a pessoa digitou.
@@ -131,6 +133,7 @@
     fChaves.value = "";
     atualizarContagem();
     loteAtual = r.body.lote;
+    pedidos = []; ultimaMudanca = "";  // lote novo: a primeira leitura traz tudo
     C.guardar(CHAVE_LOTE, loteAtual);
     mostrarRecusadas(r.body.recusadas || []);
     await carregar();
@@ -261,11 +264,24 @@
 
   async function carregar() {
     if (!loteAtual) return;
-    const r = await C.api("/api/emissoes?lote=" + encodeURIComponent(loteAtual)).catch(() => null);
+    // Depois da primeira leitura, só os pedidos que mudaram (o servidor filtra por `desde`).
+    const incremental = !!ultimaMudanca;
+    const r = await C.api("/api/emissoes?lote=" + encodeURIComponent(loteAtual) +
+      (incremental ? "&desde=" + encodeURIComponent(ultimaMudanca) : "")).catch(() => null);
     if (!r || !r.ok) return;
-    pedidos = r.body.emissoes || [];
-    // Não redesenha enquanto alguém digita a cubagem (perderia o cursor).
-    if (!(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.cub)) render();
+    const recebidos = r.body.emissoes || [];
+    if (incremental) {
+      const porId = new Map(pedidos.map(p => [p.id, p]));
+      recebidos.forEach(p => porId.set(p.id, p));
+      pedidos = Array.from(porId.values()).sort((a, b) => a.id - b.id);
+    } else {
+      pedidos = recebidos;
+    }
+    recebidos.forEach(p => {
+      if (p.atualizado_em && (!ultimaMudanca || Date.parse(p.atualizado_em) > Date.parse(ultimaMudanca))) ultimaMudanca = p.atualizado_em;
+    });
+    // Não redesenha enquanto alguém digita a cubagem (perderia o cursor) nem quando nada mudou.
+    if ((!incremental || recebidos.length) && !(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.cub)) render();
     const andando = pedidos.some(em => EM_ANDAMENTO.includes(em.status));
     if (andando && !timer) timer = setInterval(carregar, 5000);
     if (!andando && timer) { clearInterval(timer); timer = null; C.carregarRecentes(); }

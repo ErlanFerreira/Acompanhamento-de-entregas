@@ -746,6 +746,7 @@ def _emissao_to_dict(em: EmissaoCte) -> dict:
         "lote": em.lote,
         "salvar_direto": bool(em.salvar_direto),
         "cubagem": em.cubagem,
+        "atualizado_em": em.atualizado_em.isoformat() + "Z" if em.atualizado_em else None,
     }
 
 
@@ -784,14 +785,23 @@ def emissao_page(request: Request):
 
 
 @app.get("/api/emissoes", dependencies=[Depends(require_emissao_api)])
-def api_emissoes_list(request: Request, lote: str = "", db: Session = Depends(get_db)):
+def api_emissoes_list(request: Request, lote: str = "", desde: str = "", db: Session = Depends(get_db)):
+    """`desde` (só com `lote`): o `atualizado_em` mais novo que a tela já recebeu -- volta
+    só o que mudou depois disso. A tela acompanha o lote de 5 em 5 segundos; reler os até
+    200 pedidos completos a cada vez gastava a transferência de rede mensal do banco."""
     _expirar_emissoes_paradas(db)
     q = db.query(EmissaoCte)
     analista = usuario_logado(request)
     if analista:  # o analista vê os pedidos dele; o supervisor, todos
         q = q.filter(EmissaoCte.solicitante == analista["nome"])
     if lote:
-        rows = q.filter(EmissaoCte.lote == lote).order_by(EmissaoCte.id).limit(_MAX_LOTE).all()
+        q = q.filter(EmissaoCte.lote == lote)
+        if desde:
+            try:
+                q = q.filter(EmissaoCte.atualizado_em > datetime.datetime.fromisoformat(desde.rstrip("Z")))
+            except ValueError:
+                pass  # data inválida: volta o lote inteiro
+        rows = q.order_by(EmissaoCte.id).limit(_MAX_LOTE).all()
     else:
         rows = q.order_by(EmissaoCte.criado_em.desc()).limit(30).all()
     return {"emissoes": [_emissao_to_dict(em) for em in rows]}
