@@ -29,7 +29,7 @@ from sqlalchemy import create_engine, func, inspect, select, text
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import models  # noqa: E402,F401 (registra as tabelas)
-from app.db import Base, criar_tabelas_separadas, engine, engine_da_tabela, engine_separado  # noqa: E402
+from app.db import Base, criar_tabelas_separadas, engine, engine_da_tabela, engine_emissao, engine_separado  # noqa: E402
 from app.seed import init_db_and_seed  # noqa: E402
 
 NAO_COPIAR = {"tentativas_login"}
@@ -117,7 +117,7 @@ def main() -> None:
     origem = create_engine(url_antigo, connect_args=args)
 
     init_db_and_seed()  # garante as tabelas nos bancos atuais
-    if engine_separado is not engine:
+    if engine_separado is not engine or engine_emissao is not engine:
         criar_tabelas_separadas()
     for tabela in Base.metadata.sorted_tables:
         if tabela.name not in NAO_COPIAR:

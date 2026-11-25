@@ -42,7 +42,8 @@ jobs:
       - run: python scripts/run_emissao_cte.py "${{ inputs.emissao_id }}" "${{ inputs.acao }}"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          CONSULTAS_DATABASE_URL: ${{ secrets.CONSULTAS_DATABASE_URL }}  # banco separado: os pedidos de emissão ficam lá
+          CONSULTAS_DATABASE_URL: ${{ secrets.CONSULTAS_DATABASE_URL }}  # banco separado (opcional)
+          EMISSAO_DATABASE_URL: ${{ secrets.EMISSAO_DATABASE_URL }}  # banco só da emissão: os pedidos ficam lá (opcional; sem ele, no separado)
           # Usuário do GW próprio do bot (não o PORTAL_EMAIL da sincronização),
           # pra não derrubar a sessão de ninguém.
           PORTAL_EMAIL: ${{ secrets.GW_BOT_EMAIL }}

@@ -42,7 +42,7 @@ if os.environ.get("EMISSAO_PORTAL_EMAIL"):
 if os.environ.get("EMISSAO_PORTAL_ORGANIZACAO"):
     config.PORTAL_ORGANIZACAO = os.environ["EMISSAO_PORTAL_ORGANIZACAO"]
 
-from app.db import SessionLocal, criar_tabelas_separadas, engine, engine_separado  # noqa: E402
+from app.db import SessionLocal, criar_tabelas_separadas, engine, engine_emissao  # noqa: E402
 from app.emissao_cte import SessaoGW  # noqa: E402
 from app.emissao_pedidos import ETAPA_DO_STATUS, processar  # noqa: E402
 from app.models import EmissaoCte, EmissaoRobo  # noqa: E402
@@ -90,18 +90,20 @@ def _proximo(db):
 
 
 def _preparar_banco(simular: bool) -> None:
-    if engine_separado is engine:
+    # Os pedidos de emissão moram no banco da emissão (EMISSAO_DATABASE_URL) ou, se ele
+    # não existir, no banco separado do painel (CONSULTAS_DATABASE_URL).
+    if engine_emissao is engine:
         if not engine.url.drivername.startswith("sqlite"):
-            raise SystemExit("CONSULTAS_DATABASE_URL não está no .env: o robô não veria os pedidos do painel.")
+            raise SystemExit("EMISSAO_DATABASE_URL (ou CONSULTAS_DATABASE_URL) não está no .env: o robô não veria os pedidos do painel.")
         if not simular:
             raise SystemExit(
-                "Sem CONSULTAS_DATABASE_URL no .env o robô usaria o banco local de teste -- "
+                "Sem EMISSAO_DATABASE_URL no .env o robô usaria o banco local de teste -- "
                 "configure o banco do painel (ou rode com --simular pra testar)."
             )
         init_db_and_seed()
         return
     if simular:
-        raise SystemExit("--simular só roda com o banco local de teste (tire o CONSULTAS_DATABASE_URL do .env).")
+        raise SystemExit("--simular só roda com o banco local de teste (tire o EMISSAO_DATABASE_URL e o CONSULTAS_DATABASE_URL do .env).")
     criar_tabelas_separadas()
     _adicionar_colunas_faltantes(so_separado=True)
 

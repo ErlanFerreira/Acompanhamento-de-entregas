@@ -29,3 +29,4 @@ jobs:
           ANTIGO_DATABASE_URL: ${{ secrets.ANTIGO_DATABASE_URL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CONSULTAS_DATABASE_URL: ${{ secrets.CONSULTAS_DATABASE_URL }}
+          EMISSAO_DATABASE_URL: ${{ secrets.EMISSAO_DATABASE_URL }}  # banco só da emissão (opcional)

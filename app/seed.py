@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy import inspect, text
 
-from .db import TABELAS_SEPARADAS, Base, criar_tabelas_separadas, engine, engine_da_tabela, engine_separado
+from .db import Base, criar_tabelas_separadas, engine, engine_da_tabela, engine_emissao, engine_separado
 
 logger = logging.getLogger("seed")
 
@@ -98,16 +98,16 @@ def init_db_and_seed():
     from . import models  # noqa: F401 (registra as tabelas no Base)
 
     tabelas = Base.metadata.sorted_tables
-    if engine_separado is not engine:
-        # Banco separado (consultas, login dos analistas, tratativas): as
-        # tabelas dele vão pra lá primeiro, pra funcionarem mesmo que o banco
-        # principal esteja fora do ar.
+    if engine_separado is not engine or engine_emissao is not engine:
+        # Bancos separados (consultas, login dos analistas, tratativas; emissão de
+        # CT-e): as tabelas deles vão pra lá primeiro, pra funcionarem mesmo que o
+        # banco principal esteja fora do ar.
         try:
             criar_tabelas_separadas()
             _adicionar_colunas_faltantes(so_separado=True)
         except Exception:
             logger.exception("Não foi possível preparar o banco separado.")
-        tabelas = [t for t in tabelas if t.name not in TABELAS_SEPARADAS]
+        tabelas = [t for t in tabelas if engine_da_tabela(t.name) is engine]
     existentes = set(inspect(engine).get_table_names())
     Base.metadata.create_all(bind=engine, tables=tabelas)
     if not existentes:  # banco principal vazio = banco novo

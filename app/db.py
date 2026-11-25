@@ -36,6 +36,14 @@ _url_separado = _url(os.environ.get("CONSULTAS_DATABASE_URL", "").strip())
 engine_separado = _criar_engine(_url_separado) if _url_separado else engine
 engine_consultas = engine_separado  # nome antigo (scripts/run_consulta.py)
 
+# Banco só da emissão de CT-e (EMISSAO_DATABASE_URL, opcional): os pedidos, o sinal do
+# robô do PC e as fotos de cubagem. A tela acompanha os pedidos a cada poucos segundos e
+# o robô consulta a fila o dia todo -- isso gastava a cota de transferência do banco
+# separado, que também guarda o login dos analistas. Sem a variável, as tabelas de
+# emissão ficam onde estavam (no banco separado, ou no principal se ele não existir).
+_url_emissao = _url(os.environ.get("EMISSAO_DATABASE_URL", "").strip())
+engine_emissao = _criar_engine(_url_emissao) if _url_emissao else engine_separado
+
 TABELAS_CONSULTA = {"consulta_jobs", "consulta_itens"}
 TABELAS_ACESSO = {"usuarios", "tentativas_login", "tratativas_comprovante"}
 TABELAS_EMISSAO = {"emissoes_cte", "emissao_robos"}
@@ -55,7 +63,7 @@ def garantir_tabelas_separadas() -> None:
     que alguém as usa. A criação na subida do app (seed.py) pode não rodar
     (ex.: a função da Vercel sobe sem executar o lifespan)."""
     global _tabelas_separadas_ok
-    if _tabelas_separadas_ok or engine_separado is engine:
+    if _tabelas_separadas_ok or (engine_separado is engine and engine_emissao is engine):
         return
     criar_tabelas_separadas()
     _tabelas_separadas_ok = True
@@ -63,20 +71,34 @@ def garantir_tabelas_separadas() -> None:
 
 def engine_da_tabela(nome: str):
     """Em qual banco a tabela mora."""
+    if nome in TABELAS_EMISSAO:
+        return engine_emissao
     return engine_separado if nome in TABELAS_SEPARADAS else engine
 
 
+def _tabelas_por_banco_separado() -> list[tuple]:
+    """[(engine, [tabelas])] de cada banco fora do principal (consultas/acesso e emissão
+    podem ser o mesmo banco ou dois)."""
+    por_banco: dict[int, tuple] = {}
+    for t in Base.metadata.sorted_tables:
+        eng = engine_da_tabela(t.name)
+        if t.name in TABELAS_SEPARADAS and eng is not engine:
+            por_banco.setdefault(id(eng), (eng, []))[1].append(t)
+    return list(por_banco.values())
+
+
 def criar_tabelas_separadas() -> None:
-    tabelas = [t for t in Base.metadata.sorted_tables if t.name in TABELAS_SEPARADAS]
-    existentes = set(inspect(engine_separado).get_table_names())
-    Base.metadata.create_all(bind=engine_separado, tables=tabelas)
-    if engine_separado.dialect.name != "postgresql":
-        return
-    with engine_separado.begin() as conn:
-        for nome, inicio in _PRIMEIRO_ID.items():
-            if nome in existentes:
-                continue  # já existia: a sequência já está andando
-            conn.execute(text(f"ALTER SEQUENCE {nome}_id_seq RESTART WITH {inicio}"))
+    for eng, tabelas in _tabelas_por_banco_separado():
+        existentes = set(inspect(eng).get_table_names())
+        Base.metadata.create_all(bind=eng, tables=tabelas)
+        if eng.dialect.name != "postgresql":
+            continue
+        nomes = {t.name for t in tabelas}
+        with eng.begin() as conn:
+            for nome, inicio in _PRIMEIRO_ID.items():
+                if nome in existentes or nome not in nomes:
+                    continue  # já existia (a sequência já está andando) ou mora em outro banco
+                conn.execute(text(f"ALTER SEQUENCE {nome}_id_seq RESTART WITH {inicio}"))
 
 
 # Compatibilidade com o nome anterior.
@@ -88,11 +110,13 @@ class SessaoRoteada(Session):
     lá e todo o resto pro principal."""
 
     def get_bind(self, mapper=None, clause=None, **kw):
-        if engine_separado is not engine and mapper is not None:
+        if mapper is not None:
             tabela = getattr(mapper, "local_table", None)
             if tabela is not None and tabela.name in TABELAS_SEPARADAS:
-                garantir_tabelas_separadas()
-                return engine_separado
+                destino = engine_da_tabela(tabela.name)
+                if destino is not engine:
+                    garantir_tabelas_separadas()
+                    return destino
         return super().get_bind(mapper=mapper, clause=clause, **kw)
 
 
