@@ -10,15 +10,21 @@ def _url(valor: str) -> str:
     return valor.replace("postgres://", "postgresql://", 1) if valor.startswith("postgres://") else valor
 
 
-def _criar_engine(url: str):
-    args = {"check_same_thread": False} if url.startswith("sqlite") else {"connect_timeout": 8}
+def _criar_engine(url: str, rotulo: str = "outro"):
+    if url.startswith("sqlite"):
+        args = {"check_same_thread": False}
+    else:
+        # Cada cursor soma o que devolve (ver app/medidor_banco.py e /uso-banco).
+        from .medidor_banco import fabrica_de_cursor
+
+        args = {"connect_timeout": 8, "cursor_factory": fabrica_de_cursor(rotulo)}
     return create_engine(url, connect_args=args, pool_pre_ping=True)
 
 
 # Banco principal (DATABASE_URL). Trocado por um projeto Neon novo em
 # 27/10/2026, quando o anterior estourou a cota mensal de rede -- os dados que
 # ficaram no anterior são copiados com scripts/migrar_banco_antigo.py.
-engine = _criar_engine(config.DATABASE_URL)
+engine = _criar_engine(config.DATABASE_URL, "principal")
 
 # Banco separado (CONSULTAS_DATABASE_URL, opcional -- o nome ficou de quando
 # só as consultas iam pra lá): cada projeto gratuito da Neon tem a própria
@@ -33,7 +39,7 @@ engine = _criar_engine(config.DATABASE_URL)
 #     andamento a cada poucos segundos.
 # Dados que ficaram num banco anterior: copie com scripts/migrar_banco_antigo.py.
 _url_separado = _url(os.environ.get("CONSULTAS_DATABASE_URL", "").strip())
-engine_separado = _criar_engine(_url_separado) if _url_separado else engine
+engine_separado = _criar_engine(_url_separado, "separado") if _url_separado else engine
 engine_consultas = engine_separado  # nome antigo (scripts/run_consulta.py)
 
 # Banco só da emissão de CT-e (EMISSAO_DATABASE_URL, opcional): os pedidos, o sinal do
@@ -42,7 +48,7 @@ engine_consultas = engine_separado  # nome antigo (scripts/run_consulta.py)
 # separado, que também guarda o login dos analistas. Sem a variável, as tabelas de
 # emissão ficam onde estavam (no banco separado, ou no principal se ele não existir).
 _url_emissao = _url(os.environ.get("EMISSAO_DATABASE_URL", "").strip())
-engine_emissao = _criar_engine(_url_emissao) if _url_emissao else engine_separado
+engine_emissao = _criar_engine(_url_emissao, "emissao") if _url_emissao else engine_separado
 
 TABELAS_CONSULTA = {"consulta_jobs", "consulta_itens"}
 TABELAS_ACESSO = {"usuarios", "tentativas_login", "tratativas_comprovante"}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Uso do banco — Transrota{% endblock %}
+{% block content %}
+<div class="viz-root">
+  <header class="app-header">
+    <div>
+      <h1>Uso do banco</h1>
+      <p>Quanto cada tela e cada robô tirou de cada banco (a cota gratuita da Neon é de <strong>5 GB por mês</strong> de transferência de saída, cerca de <strong>{{ "%.0f"|format(cota_dia) }} MB por dia</strong>, em cada projeto). Gravar no banco não conta, só ler. Os números são uma estimativa por baixo: servem para achar quem gasta mais.</p>
+    </div>
+    <form method="get" style="display:flex; gap:8px; align-items:center;">
+      <label class="filter-label" for="dias">Período</label>
+      <select id="dias" name="dias" onchange="this.form.submit()">
+        {% for d in (1, 3, 7, 14, 30) %}<option value="{{ d }}" {% if d == dias %}selected{% endif %}>{{ "Hoje" if d == 1 else "Últimos %d dias"|format(d) }}</option>{% endfor %}
+      </select>
+    </form>
+  </header>
+
+  {% if erro_gravacao %}
+  <div class="bip-feedback erro show" style="margin-bottom:14px;">A última gravação da medição falhou: {{ erro_gravacao }}</div>
+  {% endif %}
+
+  <section class="table-section" style="margin-bottom:14px;">
+    <div class="table-toolbar"><h2>Por dia (MB)</h2></div>
+    {% if tabela_dias %}
+    <div class="table-scroll">
+      <table class="detail">
+        <thead><tr><th>Dia</th>{% for _, nome in bancos %}<th class="num">{{ nome }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for linha in tabela_dias %}
+          <tr>
+            <td>{{ linha.dia[8:10] }}/{{ linha.dia[5:7] }}</td>
+            {% for b, _ in bancos %}
+            {% set mb = linha.mb[b] %}
+            <td class="num" {% if mb > cota_dia %}style="color:var(--status-critical); font-weight:650;" title="Acima da média que cabe na cota"{% endif %}>{{ "%.1f"|format(mb) }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">Ainda não há medições. Elas começam a aparecer conforme as telas e os robôs usam o banco.</div>
+    {% endif %}
+  </section>
+
+  <section class="table-section">
+    <div class="table-toolbar"><h2>Quem mais lê</h2><span class="count">no período</span></div>
+    {% if linhas %}
+    <div class="table-scroll" style="max-height:none;">
+      <table class="detail">
+        <thead><tr><th>Banco</th><th>Origem (tela ou robô)</th><th class="num">Consultas</th><th class="num">Linhas lidas</th><th class="num">MB</th><th class="num">MB/dia</th><th class="num">% do banco</th></tr></thead>
+        <tbody>
+          {% for l in linhas %}
+          <tr>
+            <td>{{ l.banco }}</td>
+            <td><code>{{ l.origem }}</code></td>
+            <td class="num">{{ "{:,}".format(l.consultas).replace(",", ".") }}</td>
+            <td class="num">{{ "{:,}".format(l.linhas).replace(",", ".") }}</td>
+            <td class="num">{{ "%.1f"|format(l.mb) }}</td>
+            <td class="num">{{ "%.1f"|format(l.mb_dia) }}</td>
+            <td class="num">{{ "%.0f"|format(l.pct) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">Sem medições no período.</div>
+    {% endif %}
+  </section>
+
+  <footer class="app-footer">
+    <strong>Como ler</strong> — "Origem" é o nome interno da tela que fez a consulta (ex.: <code>api_cargas</code> = dados do Painel/Comprovantes, <code>api_faturas_pendentes</code> = pendentes da Emissão de Protocolo) ou <code>job:&lt;robô&gt;</code> para os robôs (sincronização, resumo diário, consultas, e-mail). As somas são gravadas de minuto em minuto, então o que acabou de acontecer pode levar até 1 ou 2 minutos para aparecer.
+  </footer>
+</div>
+{% endblock %}

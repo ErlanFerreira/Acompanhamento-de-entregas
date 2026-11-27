@@ -13,6 +13,8 @@ import openpyxl
 from openpyxl.styles import PatternFill
 import requests
 from fastapi import Depends, FastAPI, Form, Request, UploadFile
+from starlette.concurrency import run_in_threadpool
+from starlette.routing import Match
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -23,7 +25,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, defer, undefer
 
 from . import chave_cte, config, relatorios_bipagem, tipos_cte
-from . import agendamento, bloqueio_login, escopo, gdc, historico, planilha_marca
+from . import agendamento, bloqueio_login, escopo, gdc, historico, medidor_banco, planilha_marca
 from . import painel_bips, painel_snapshot
 from .db import get_db
 from .models import Bipagem, Carga, ConsultaItem, ConsultaJob, EmissaoCte, EmissaoRobo, Meta, ProtocoloFatura, TratativaComprovante, Usuario
@@ -99,6 +101,25 @@ async def erro_de_banco(request: Request, exc: SQLAlchemyError):
         detalhe = " ".join(str(getattr(exc, "orig", exc)).split())[:300]
         return JSONResponse({"erro": f"Banco de dados indisponível ou com problema: {detalhe}"}, status_code=503)
     return HTMLResponse("<h1>Banco de dados indisponível</h1><p>Tente de novo em alguns minutos.</p>", status_code=503)
+
+
+@app.middleware("http")
+async def medir_uso_do_banco(request: Request, call_next):
+    """Atribui o que as consultas devolvem à rota que as fez (ver
+    app/medidor_banco.py e a tela /uso-banco)."""
+    origem = request.url.path
+    for rota in app.router.routes:
+        if rota.matches(request.scope)[0] == Match.FULL:
+            origem = getattr(rota, "name", None) or origem
+            break
+    token = medidor_banco.iniciar_requisicao(origem)
+    try:
+        return await call_next(request)
+    finally:
+        if medidor_banco.terminar_requisicao(token):
+            await run_in_threadpool(medidor_banco.gravar)
+
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 # Usados no menu (base.html): esconder as telas restritas de quem entrou pelo
@@ -504,6 +525,59 @@ SENHA_MIN = 6
 @app.get("/usuarios", response_class=HTMLResponse, dependencies=[Depends(require_supervisor_page)])
 def usuarios_page(request: Request):
     return templates.TemplateResponse("usuarios.html", {"request": request, "active": "usuarios"})
+
+
+_BANCOS_USO = {"p": "Principal", "s": "Separado (login, tratativas, consultas)", "e": "Emissão de CT-e", "o": "Outro"}
+_COTA_MB_DIA = 5 * 1024 / 30  # plano gratuito da Neon: 5 GB/mês de transferência por projeto
+
+
+@app.get("/uso-banco", response_class=HTMLResponse, dependencies=[Depends(require_supervisor_page)])
+def uso_banco_page(request: Request, dias: int = 7, db: Session = Depends(get_db)):
+    """Quanto cada tela/robô tirou de cada banco (medido em app/medidor_banco.py)."""
+    medidor_banco.gravar()  # o que esta instância ainda tinha na memória
+    dias = max(1, min(dias, 60))
+    hoje = datetime.date.today()
+    desde = (hoje - datetime.timedelta(days=dias - 1)).isoformat()
+    # Medições com mais de 60 dias não servem pra nada.
+    db.query(Meta).filter(Meta.chave.like("ub:%"), Meta.chave < f"ub:{(hoje - datetime.timedelta(days=60)).isoformat()}").delete(
+        synchronize_session=False)
+    db.commit()
+
+    por_dia: dict[tuple[str, str], int] = {}
+    origens: dict[tuple[str, str], list[int]] = {}
+    for m in db.query(Meta).filter(Meta.chave.like("ub:%"), Meta.chave >= f"ub:{desde}"):
+        try:
+            _, dia, banco, origem = m.chave.split(":", 3)
+            consultas, linhas, nbytes = (int(x) for x in m.valor.split("|"))
+        except ValueError:
+            continue
+        por_dia[(dia, banco)] = por_dia.get((dia, banco), 0) + nbytes
+        soma = origens.setdefault((banco, origem), [0, 0, 0])
+        soma[0] += consultas
+        soma[1] += linhas
+        soma[2] += nbytes
+
+    total_banco = {}
+    for (banco, _), (_, _, nbytes) in origens.items():
+        total_banco[banco] = total_banco.get(banco, 0) + nbytes
+    linhas_tabela = [
+        {
+            "banco": _BANCOS_USO.get(banco, banco), "origem": origem, "consultas": c, "linhas": l,
+            "mb": b / 1048576, "mb_dia": b / 1048576 / dias,
+            "pct": 100 * b / total_banco[banco] if total_banco.get(banco) else 0,
+        }
+        for (banco, origem), (c, l, b) in sorted(origens.items(), key=lambda x: -x[1][2])
+    ]
+    dias_lista = sorted({d for d, _ in por_dia}, reverse=True)
+    bancos = [b for b in _BANCOS_USO if any(k[1] == b for k in por_dia)]
+    tabela_dias = [
+        {"dia": d, "mb": {b: por_dia.get((d, b), 0) / 1048576 for b in bancos}} for d in dias_lista
+    ]
+    return templates.TemplateResponse("uso_banco.html", {
+        "request": request, "active": "uso_banco", "dias": dias, "linhas": linhas_tabela,
+        "tabela_dias": tabela_dias, "bancos": [(b, _BANCOS_USO[b]) for b in bancos], "cota_dia": _COTA_MB_DIA,
+        "erro_gravacao": medidor_banco.ultimo_erro,
+    })
 
 
 def _usuario_to_dict(u: Usuario, bloqueado_ate: datetime.datetime | None = None) -> dict:
