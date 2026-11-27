@@ -32,7 +32,7 @@ from app import models  # noqa: E402,F401 (registra as tabelas)
 from app.db import Base, criar_tabelas_separadas, engine, engine_da_tabela, engine_emissao, engine_separado  # noqa: E402
 from app.seed import init_db_and_seed  # noqa: E402
 
-NAO_COPIAR = {"tentativas_login"}
+NAO_COPIAR = {"tentativas_login", "painel_snapshots"}  # bloqueio de 15 min; Painel pronto: a sincronização regrava
 SEM_ID = {"cargas"}  # copiadas pelo id_cte
 LOTE = 1000
 

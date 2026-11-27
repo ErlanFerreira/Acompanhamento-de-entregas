@@ -31,6 +31,7 @@ jobs:
       - run: python scripts/run_sync.py
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PAINEL_DATABASE_URL: ${{ secrets.PAINEL_DATABASE_URL }}  # banco só do Painel pronto (opcional)
           PORTAL_EMAIL: ${{ secrets.PORTAL_EMAIL }}
           PORTAL_SENHA: ${{ secrets.PORTAL_SENHA }}
           SYNC_WINDOW_DAYS: "90"

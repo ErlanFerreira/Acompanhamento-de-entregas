@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy import inspect, text
 
-from .db import Base, criar_tabelas_separadas, engine, engine_da_tabela, engine_emissao, engine_separado
+from .db import Base, criar_tabelas_separadas, engine, engine_da_tabela, engine_emissao, engine_painel, engine_separado
 
 logger = logging.getLogger("seed")
 
@@ -98,10 +98,10 @@ def init_db_and_seed():
     from . import models  # noqa: F401 (registra as tabelas no Base)
 
     tabelas = Base.metadata.sorted_tables
-    if engine_separado is not engine or engine_emissao is not engine:
+    if any(e is not engine for e in (engine_separado, engine_emissao, engine_painel)):
         # Bancos separados (consultas, login dos analistas, tratativas; emissão de
-        # CT-e): as tabelas deles vão pra lá primeiro, pra funcionarem mesmo que o
-        # banco principal esteja fora do ar.
+        # CT-e; Painel pronto): as tabelas deles vão pra lá primeiro, pra
+        # funcionarem mesmo que o banco principal esteja fora do ar.
         try:
             criar_tabelas_separadas()
             _adicionar_colunas_faltantes(so_separado=True)

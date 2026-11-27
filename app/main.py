@@ -527,7 +527,7 @@ def usuarios_page(request: Request):
     return templates.TemplateResponse("usuarios.html", {"request": request, "active": "usuarios"})
 
 
-_BANCOS_USO = {"p": "Principal", "s": "Separado (login, tratativas, consultas)", "e": "Emissão de CT-e", "o": "Outro"}
+_BANCOS_USO = {"p": "Principal", "n": "Painel pronto", "s": "Separado (login, tratativas, consultas)", "e": "Emissão de CT-e", "o": "Outro"}
 _COTA_MB_DIA = 5 * 1024 / 30  # plano gratuito da Neon: 5 GB/mês de transferência por projeto
 
 

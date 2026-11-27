@@ -50,10 +50,19 @@ engine_consultas = engine_separado  # nome antigo (scripts/run_consulta.py)
 _url_emissao = _url(os.environ.get("EMISSAO_DATABASE_URL", "").strip())
 engine_emissao = _criar_engine(_url_emissao, "emissao") if _url_emissao else engine_separado
 
+# Banco só do Painel pronto (PAINEL_DATABASE_URL, opcional): a lista compactada de
+# CT-e que o Painel e Comprovantes leem a cada abertura (app/painel_snapshot.py) --
+# a leitura mais frequente do app. Num projeto Neon à parte, ela tem a própria cota
+# de 5 GB/mês e não divide a do principal. Nada a copiar: a sincronização regrava a
+# tabela a cada rodada. Sem a variável, fica no principal.
+_url_painel = _url(os.environ.get("PAINEL_DATABASE_URL", "").strip())
+engine_painel = _criar_engine(_url_painel, "painel") if _url_painel else engine
+
 TABELAS_CONSULTA = {"consulta_jobs", "consulta_itens"}
 TABELAS_ACESSO = {"usuarios", "tentativas_login", "tratativas_comprovante"}
 TABELAS_EMISSAO = {"emissoes_cte", "emissao_robos"}
-TABELAS_SEPARADAS = TABELAS_CONSULTA | TABELAS_ACESSO | TABELAS_EMISSAO
+TABELAS_PAINEL = {"painel_snapshots"}
+TABELAS_SEPARADAS = TABELAS_CONSULTA | TABELAS_ACESSO | TABELAS_EMISSAO | TABELAS_PAINEL
 
 # Primeiro id das tabelas de acesso quando são criadas no banco separado --
 # os registros copiados do principal (ids pequenos) mantêm o id original sem
@@ -69,7 +78,7 @@ def garantir_tabelas_separadas() -> None:
     que alguém as usa. A criação na subida do app (seed.py) pode não rodar
     (ex.: a função da Vercel sobe sem executar o lifespan)."""
     global _tabelas_separadas_ok
-    if _tabelas_separadas_ok or (engine_separado is engine and engine_emissao is engine):
+    if _tabelas_separadas_ok or all(e is engine for e in (engine_separado, engine_emissao, engine_painel)):
         return
     criar_tabelas_separadas()
     _tabelas_separadas_ok = True
@@ -79,12 +88,14 @@ def engine_da_tabela(nome: str):
     """Em qual banco a tabela mora."""
     if nome in TABELAS_EMISSAO:
         return engine_emissao
+    if nome in TABELAS_PAINEL:
+        return engine_painel
     return engine_separado if nome in TABELAS_SEPARADAS else engine
 
 
 def _tabelas_por_banco_separado() -> list[tuple]:
-    """[(engine, [tabelas])] de cada banco fora do principal (consultas/acesso e emissão
-    podem ser o mesmo banco ou dois)."""
+    """[(engine, [tabelas])] de cada banco fora do principal (consultas/acesso, emissão e
+    Painel pronto podem ser o mesmo banco ou bancos diferentes)."""
     por_banco: dict[int, tuple] = {}
     for t in Base.metadata.sorted_tables:
         eng = engine_da_tabela(t.name)
