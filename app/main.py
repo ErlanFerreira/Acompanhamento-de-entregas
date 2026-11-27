@@ -527,7 +527,7 @@ def usuarios_page(request: Request):
     return templates.TemplateResponse("usuarios.html", {"request": request, "active": "usuarios"})
 
 
-_BANCOS_USO = {"p": "Principal", "n": "Painel pronto", "s": "Separado (login, tratativas, consultas)", "e": "Emissão de CT-e", "o": "Outro"}
+_BANCOS_USO = {"p": "Principal", "n": "Painel pronto", "b": "Emissão de Protocolo (bips)", "s": "Separado (login, tratativas, consultas)", "e": "Emissão de CT-e", "o": "Outro"}
 _COTA_MB_DIA = 5 * 1024 / 30  # plano gratuito da Neon: 5 GB/mês de transferência por projeto
 
 
@@ -1294,7 +1294,9 @@ def _protocolo_permitido(request: Request, db: Session, protocolo_id: int) -> bo
 
 @app.get("/api/bipagem/faturas/protocolos", dependencies=[Depends(exigir_tela_api("bipagem"))])
 def api_faturas_protocolos(request: Request, db: Session = Depends(get_db)):
-    q = db.query(ProtocoloFatura)
+    # Sem o arquivo de cada protocolo: a lista só mostra número, data, tomador e
+    # quantidade, e trazer os 50 arquivos a cada abertura da tela gastava a cota do banco.
+    q = db.query(ProtocoloFatura).options(defer(ProtocoloFatura.arquivo))
     empresas = escopo_empresas(request)
     if empresas is not None:
         q = q.filter(ProtocoloFatura.id.in_(_protocolos_visiveis(db, empresas) or {-1}))

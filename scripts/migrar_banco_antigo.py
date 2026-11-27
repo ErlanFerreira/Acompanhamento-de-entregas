@@ -16,7 +16,12 @@ dados antigos vêm depois, quando o antigo voltar a responder.
 - Não copia o bloqueio por senha errada (tentativas_login).
 
 Uso:
-    python scripts/migrar_banco_antigo.py [--simular]
+    python scripts/migrar_banco_antigo.py [--simular] [--tabelas=bipagens,protocolos_fatura]
+
+--tabelas limita a cópia a essas tabelas (sem ela, copia todas). Use ao mover só
+uma parte do banco principal pra um banco novo, com ANTIGO_DATABASE_URL = o
+próprio principal: sem o filtro, tabelas que já tinham saído do principal antes
+(ex.: analistas, tratativas) teriam a cópia velha que ficou lá recopiada.
 
 No GitHub: Actions > "Migrar do banco antigo" > Run (secret ANTIGO_DATABASE_URL).
 """
@@ -110,6 +115,10 @@ def copiar(origem, tabela, simular: bool) -> None:
 
 def main() -> None:
     simular = "--simular" in sys.argv
+    escolhidas = {t.strip() for a in sys.argv if a.startswith("--tabelas=") for t in a.split("=", 1)[1].split(",") if t.strip()}
+    desconhecidas = escolhidas - set(Base.metadata.tables)
+    if desconhecidas:
+        sys.exit(f"Tabela(s) desconhecida(s): {', '.join(sorted(desconhecidas))}")
     url_antigo = _url(os.environ.get("ANTIGO_DATABASE_URL", "").strip())
     if not url_antigo:
         sys.exit("ANTIGO_DATABASE_URL não está definida -- de onde copiar?")
@@ -117,10 +126,9 @@ def main() -> None:
     origem = create_engine(url_antigo, connect_args=args)
 
     init_db_and_seed()  # garante as tabelas nos bancos atuais
-    if engine_separado is not engine or engine_emissao is not engine:
-        criar_tabelas_separadas()
+    criar_tabelas_separadas()  # bancos fora do principal (não faz nada se não houver)
     for tabela in Base.metadata.sorted_tables:
-        if tabela.name not in NAO_COPIAR:
+        if tabela.name not in NAO_COPIAR and (not escolhidas or tabela.name in escolhidas):
             copiar(origem, tabela, simular)
     if simular:
         print("(simulação: nada foi gravado)")

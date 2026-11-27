@@ -10,6 +10,10 @@ on:
         description: "Só contar o que tem no banco antigo (não grava nada)"
         type: boolean
         default: false
+      tabelas:
+        description: "Só estas tabelas, separadas por vírgula (vazio = todas). Ex.: bipagens,protocolos_fatura"
+        type: string
+        default: ""
 
 jobs:
   migrar:
@@ -24,9 +28,11 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - run: python scripts/migrar_banco_antigo.py ${{ inputs.simular && '--simular' || '' }}
+      - run: python scripts/migrar_banco_antigo.py ${{ inputs.simular && '--simular' || '' }} ${{ inputs.tabelas != '' && format('--tabelas={0}', inputs.tabelas) || '' }}
         env:
           ANTIGO_DATABASE_URL: ${{ secrets.ANTIGO_DATABASE_URL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CONSULTAS_DATABASE_URL: ${{ secrets.CONSULTAS_DATABASE_URL }}
           EMISSAO_DATABASE_URL: ${{ secrets.EMISSAO_DATABASE_URL }}  # banco só da emissão (opcional)
+          BIP_DATABASE_URL: ${{ secrets.BIP_DATABASE_URL }}  # banco só dos bips/protocolos (opcional)
+          PAINEL_DATABASE_URL: ${{ secrets.PAINEL_DATABASE_URL }}  # banco só do Painel pronto (opcional)

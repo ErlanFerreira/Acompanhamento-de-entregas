@@ -58,17 +58,30 @@ engine_emissao = _criar_engine(_url_emissao, "emissao") if _url_emissao else eng
 _url_painel = _url(os.environ.get("PAINEL_DATABASE_URL", "").strip())
 engine_painel = _criar_engine(_url_painel, "painel") if _url_painel else engine
 
+# Banco só da Emissão de Protocolo (BIP_DATABASE_URL, opcional): os bips e os
+# protocolos de faturas gerados (com o arquivo de cada um). Com o principal fora do
+# ar a tela ainda precisa dele pra identificar o CT-e bipado, mas a leitura dos bips
+# e protocolos deixa de gastar a cota do principal. Ao ligar, copie os dados com o
+# workflow "Migrar do banco antigo" (ver docs/bip_banco_proprio.md). Sem a
+# variável, ficam no principal.
+_url_bip = _url(os.environ.get("BIP_DATABASE_URL", "").strip())
+engine_bip = _criar_engine(_url_bip, "bip") if _url_bip else engine
+
 TABELAS_CONSULTA = {"consulta_jobs", "consulta_itens"}
 TABELAS_ACESSO = {"usuarios", "tentativas_login", "tratativas_comprovante"}
 TABELAS_EMISSAO = {"emissoes_cte", "emissao_robos"}
 TABELAS_PAINEL = {"painel_snapshots"}
-TABELAS_SEPARADAS = TABELAS_CONSULTA | TABELAS_ACESSO | TABELAS_EMISSAO | TABELAS_PAINEL
+TABELAS_BIP = {"bipagens", "protocolos_fatura"}
+TABELAS_SEPARADAS = TABELAS_CONSULTA | TABELAS_ACESSO | TABELAS_EMISSAO | TABELAS_PAINEL | TABELAS_BIP
 
 # Primeiro id das tabelas de acesso quando são criadas no banco separado --
 # os registros copiados do principal (ids pequenos) mantêm o id original sem
 # colidir com os criados lá antes da cópia. Mantém válidos os cookies de
 # sessão dos analistas, que guardam o id.
-_PRIMEIRO_ID = {"usuarios": 1000, "tratativas_comprovante": 100_000}
+# Bips: ids internos (ninguém vê), começam altos pra não colidir com os copiados do
+# principal. O número do protocolo segue de onde o principal parou (a cópia acerta a
+# sequência) -- por isso não se gera protocolo durante a troca.
+_PRIMEIRO_ID = {"usuarios": 1000, "tratativas_comprovante": 100_000, "bipagens": 10_000_000}
 
 _tabelas_separadas_ok = False
 
@@ -78,7 +91,7 @@ def garantir_tabelas_separadas() -> None:
     que alguém as usa. A criação na subida do app (seed.py) pode não rodar
     (ex.: a função da Vercel sobe sem executar o lifespan)."""
     global _tabelas_separadas_ok
-    if _tabelas_separadas_ok or all(e is engine for e in (engine_separado, engine_emissao, engine_painel)):
+    if _tabelas_separadas_ok or all(e is engine for e in (engine_separado, engine_emissao, engine_painel, engine_bip)):
         return
     criar_tabelas_separadas()
     _tabelas_separadas_ok = True
@@ -90,12 +103,14 @@ def engine_da_tabela(nome: str):
         return engine_emissao
     if nome in TABELAS_PAINEL:
         return engine_painel
+    if nome in TABELAS_BIP:
+        return engine_bip
     return engine_separado if nome in TABELAS_SEPARADAS else engine
 
 
 def _tabelas_por_banco_separado() -> list[tuple]:
-    """[(engine, [tabelas])] de cada banco fora do principal (consultas/acesso, emissão e
-    Painel pronto podem ser o mesmo banco ou bancos diferentes)."""
+    """[(engine, [tabelas])] de cada banco fora do principal (consultas/acesso, emissão,
+    Painel pronto e bips podem ser o mesmo banco ou bancos diferentes)."""
     por_banco: dict[int, tuple] = {}
     for t in Base.metadata.sorted_tables:
         eng = engine_da_tabela(t.name)

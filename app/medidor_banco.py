@@ -10,7 +10,7 @@ vão pra tabela `meta` do banco principal, numa linha por dia + banco + origem:
     chave "ub:AAAA-MM-DD:<banco>:<origem>"  valor "consultas|linhas|bytes"
 
 <banco>: p = principal, s = separado (login/tratativas/consultas),
-e = emissão, n = Painel pronto, o = outro. <origem>: nome da rota do app (ex. api_cargas) ou
+e = emissão, n = Painel pronto, b = bips/protocolos, o = outro. <origem>: nome da rota do app (ex. api_cargas) ou
 "job:<script>" nos robôs do GitHub Actions/PC. A tela /uso-banco mostra os
 números.
 """
@@ -26,7 +26,7 @@ import time
 
 logger = logging.getLogger("medidor_banco")
 
-_SIGLAS = {"principal": "p", "separado": "s", "emissao": "e", "painel": "n"}
+_SIGLAS = {"principal": "p", "separado": "s", "emissao": "e", "painel": "n", "bip": "b"}
 _INTERVALO_GRAVACAO = 60  # segundos entre gravações das somas no banco
 
 # Origem da requisição em andamento (None fora de uma requisição do app).
